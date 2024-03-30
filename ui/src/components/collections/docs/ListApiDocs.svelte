@@ -1,18 +1,21 @@
 <script>
-    import { Collection } from "pocketbase";
     import ApiClient from "@/utils/ApiClient";
     import CommonHelper from "@/utils/CommonHelper";
     import CodeBlock from "@/components/base/CodeBlock.svelte";
     import FilterSyntax from "@/components/collections/docs/FilterSyntax.svelte";
+    import SdkTabs from "@/components/collections/docs/SdkTabs.svelte";
+    import FieldsQueryParam from "@/components/collections/docs/FieldsQueryParam.svelte";
 
-    export let collection = new Collection();
+    export let collection;
 
     let responseTab = 200;
-    let sdkTab = "JavaScript";
     let responses = [];
-    let sdkExamples = [];
+
+    $: fieldNames = CommonHelper.getAllCollectionIdentifiers(collection);
 
     $: adminsOnly = collection?.listRule === null;
+
+    $: backendAbsUrl = CommonHelper.getApiExampleUrl(ApiClient.baseUrl);
 
     $: if (collection?.id) {
         responses.push({
@@ -21,6 +24,7 @@
                 {
                     page: 1,
                     perPage: 30,
+                    totalPages: 1,
                     totalItems: 2,
                     items: [
                         CommonHelper.dummyCollectionRecord(collection),
@@ -55,46 +59,67 @@
                 `,
             });
         }
-
-        responses.push({
-            code: 404,
-            body: `
-                {
-                  "code": 404,
-                  "message": "The requested resource wasn't found.",
-                  "data": {}
-                }
-            `,
-        });
     }
-
-    $: sdkExamples = [
-        {
-            lang: "JavaScript",
-            code: `
-                import PocketBase from 'pocketbase';
-
-                const client = new PocketBase("${ApiClient.baseUrl}");
-
-                client.Records.getList("${collection?.name}", { page: 2 })
-                    .then(function (list) {
-                        // success...
-                    }).catch(function (error) {
-                        // error...
-                    });
-
-                // alternatively you can also fetch all records at once via getFullList:
-                client.Records.getFullList("${collection?.name}", 200 /* batch size */)
-                    .then(function (records) {
-                        // success...
-                    }).catch(function (error) {
-                        // error...
-                    });
-            `,
-        },
-    ];
 </script>
 
+<h3 class="m-b-sm">List/Search ({collection.name})</h3>
+<div class="content txt-lg m-b-sm">
+    <p>
+        Fetch a paginated <strong>{collection.name}</strong> records list, supporting sorting and filtering.
+    </p>
+</div>
+
+<SdkTabs
+    js={`
+        import PocketBase from 'pocketbase';
+
+        const pb = new PocketBase('${backendAbsUrl}');
+
+        ...
+
+        // fetch a paginated records list
+        const resultList = await pb.collection('${collection?.name}').getList(1, 50, {
+            filter: 'created >= "2022-01-01 00:00:00" && someField1 != someField2',
+        });
+
+        // you can also fetch all records at once via getFullList
+        const records = await pb.collection('${collection?.name}').getFullList({
+            sort: '-created',
+        });
+
+        // or fetch only the first record that matches the specified filter
+        const record = await pb.collection('${collection?.name}').getFirstListItem('someField="test"', {
+            expand: 'relField1,relField2.subRelField',
+        });
+    `}
+    dart={`
+        import 'package:pocketbase/pocketbase.dart';
+
+        final pb = PocketBase('${backendAbsUrl}');
+
+        ...
+
+        // fetch a paginated records list
+        final resultList = await pb.collection('${collection?.name}').getList(
+          page: 1,
+          perPage: 50,
+          filter: 'created >= "2022-01-01 00:00:00" && someField1 != someField2',
+        );
+
+        // you can also fetch all records at once via getFullList
+        final records = await pb.collection('${collection?.name}').getFullList(
+          sort: '-created',
+        );
+
+        // or fetch only the first record that matches the specified filter
+        final record = await pb.collection('${collection?.name}').getFirstListItem(
+          'someField="test"',
+          expand: 'relField1,relField2.subRelField',
+        );
+    `}
+/>
+
+<h6 class="m-b-xs">API details</h6>
 <div class="alert alert-info">
     <strong class="label label-primary">GET</strong>
     <div class="content">
@@ -103,38 +128,12 @@
         </p>
     </div>
     {#if adminsOnly}
-        <p class="txt-hint txt-sm txt-right">Requires <code>Authorization: Admin TOKEN</code> header</p>
+        <p class="txt-hint txt-sm txt-right">Requires admin <code>Authorization:TOKEN</code> header</p>
     {/if}
 </div>
 
-<div class="content m-b-base">
-    <p>Fetch a paginated <strong>{collection.name}</strong> records list.</p>
-</div>
-
-<div class="section-title">Client SDKs example</div>
-<div class="tabs m-b-lg">
-    <div class="tabs-header compact left">
-        {#each sdkExamples as example (example.lang)}
-            <button
-                class="tab-item"
-                class:active={sdkTab === example.lang}
-                on:click={() => (sdkTab = example.lang)}
-            >
-                {example.lang}
-            </button>
-        {/each}
-    </div>
-    <div class="tabs-content">
-        {#each sdkExamples as example (example.lang)}
-            <div class="tab-item" class:active={sdkTab === example.lang}>
-                <CodeBlock content={example.code} />
-            </div>
-        {/each}
-    </div>
-</div>
-
 <div class="section-title">Query parameters</div>
-<table class="table-compact table-border m-b-lg">
+<table class="table-compact table-border m-b-base">
     <thead>
         <tr>
             <th>Param</th>
@@ -172,6 +171,13 @@
                         ?sort=-created,id
                     `}
                 />
+                <p>
+                    <strong>Supported record sort fields:</strong> <br />
+                    <code>@random</code>,
+                    {#each fieldNames as name, i}
+                        <code>{name}</code>{i < fieldNames.length - 1 ? ", " : ""}
+                    {/each}
+                </p>
             </td>
         </tr>
         <tr>
@@ -195,16 +201,32 @@
                 <span class="label">String</span>
             </td>
             <td>
-                Auto expand nested record relations. Ex.:
-                <CodeBlock
-                    content={`
-                        ?expand=rel1,rel2.subrel21.subrel22
-                    `}
-                />
+                Auto expand record relations. Ex.:
+                <CodeBlock content={`?expand=relField1,relField2.subRelField`} />
                 Supports up to 6-levels depth nested relations expansion. <br />
                 The expanded relations will be appended to each individual record under the
-                <code>@expand</code> property (eg. <code>{`"@expand": {"rel1": {...}, ...}`}</code>). Only the
-                relations that the user has permissions to <strong>view</strong> will be expanded.
+                <code>expand</code> property (eg. <code>{`"expand": {"relField1": {...}, ...}`}</code>).
+                <br />
+                Only the relations to which the request user has permissions to <strong>view</strong> will be expanded.
+            </td>
+        </tr>
+        <FieldsQueryParam />
+        <tr>
+            <td id="query-page">skipTotal</td>
+            <td>
+                <span class="label">Boolean</span>
+            </td>
+            <td>
+                If it is set the total counts query will be skipped and the response fields
+                <code>totalItems</code> and <code>totalPages</code> will have <code>-1</code> value.
+                <br />
+                This could drastically speed up the search queries when the total counters are not needed or cursor
+                based pagination is used.
+                <br />
+                For optimization purposes, it is set by default for the
+                <code>getFirstListItem()</code>
+                and
+                <code>getFullList()</code> SDKs methods.
             </td>
         </tr>
     </tbody>
@@ -212,15 +234,16 @@
 
 <div class="section-title">Responses</div>
 <div class="tabs">
-    <div class="tabs-header compact left">
+    <div class="tabs-header compact combined left">
         {#each responses as response (response.code)}
-            <div
+            <button
+                type="button"
                 class="tab-item"
                 class:active={responseTab === response.code}
                 on:click={() => (responseTab = response.code)}
             >
                 {response.code}
-            </div>
+            </button>
         {/each}
     </div>
     <div class="tabs-content">

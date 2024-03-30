@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	"github.com/pocketbase/pocketbase/models"
-	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 func TestBaseModelHasId(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		model    models.BaseModel
 		expected bool
@@ -34,29 +35,75 @@ func TestBaseModelHasId(t *testing.T) {
 	}
 }
 
-func TestBaseModelGetId(t *testing.T) {
-	m0 := models.BaseModel{}
-	if m0.GetId() != "" {
-		t.Fatalf("Expected zero id value, got %v", m0.GetId())
+func TestBaseModelId(t *testing.T) {
+	t.Parallel()
+
+	m := models.BaseModel{}
+
+	if m.GetId() != "" {
+		t.Fatalf("Expected empty id value, got %v", m.GetId())
 	}
 
-	id := "abc"
-	m1 := models.BaseModel{Id: id}
-	if m1.GetId() != id {
-		t.Fatalf("Expected id %v, got %v", id, m1.GetId())
+	m.SetId("test")
+
+	if m.GetId() != "test" {
+		t.Fatalf("Expected %q id, got %v", "test", m.GetId())
+	}
+
+	m.RefreshId()
+
+	if len(m.GetId()) != 15 {
+		t.Fatalf("Expected 15 chars id, got %v", m.GetId())
 	}
 }
 
-func TestBaseModelRefreshId(t *testing.T) {
-	m := models.BaseModel{}
-	m.RefreshId()
+func TestBaseModelIsNew(t *testing.T) {
+	t.Parallel()
 
-	if m.GetId() == "" {
-		t.Fatalf("Expected nonempty id value, got %v", m.GetId())
+	m0 := models.BaseModel{}
+	m1 := models.BaseModel{Id: ""}
+	m2 := models.BaseModel{Id: "test"}
+	m3 := models.BaseModel{}
+	m3.MarkAsNotNew()
+	m4 := models.BaseModel{Id: "test"}
+	m4.MarkAsNotNew()
+	m5 := models.BaseModel{Id: "test"}
+	m5.MarkAsNew()
+	m5.MarkAsNotNew()
+	m6 := models.BaseModel{}
+	m6.RefreshId()
+	m7 := models.BaseModel{}
+	m7.MarkAsNotNew()
+	m7.RefreshId()
+	m8 := models.BaseModel{}
+	m8.PostScan()
+
+	scenarios := []struct {
+		model    models.BaseModel
+		expected bool
+	}{
+		{m0, true},
+		{m1, true},
+		{m2, true},
+		{m3, false},
+		{m4, false},
+		{m5, false},
+		{m6, true},
+		{m7, false},
+		{m8, false},
+	}
+
+	for i, s := range scenarios {
+		result := s.model.IsNew()
+		if result != s.expected {
+			t.Errorf("(%d) Expected IsNew %v, got %v", i, s.expected, result)
+		}
 	}
 }
 
 func TestBaseModelCreated(t *testing.T) {
+	t.Parallel()
+
 	m := models.BaseModel{}
 
 	if !m.GetCreated().IsZero() {
@@ -71,6 +118,8 @@ func TestBaseModelCreated(t *testing.T) {
 }
 
 func TestBaseModelUpdated(t *testing.T) {
+	t.Parallel()
+
 	m := models.BaseModel{}
 
 	if !m.GetUpdated().IsZero() {
@@ -81,98 +130,5 @@ func TestBaseModelUpdated(t *testing.T) {
 
 	if m.GetUpdated().IsZero() {
 		t.Fatalf("Expected non-zero datetime, got %v", m.GetUpdated())
-	}
-}
-
-// -------------------------------------------------------------------
-// BaseAccount tests
-// -------------------------------------------------------------------
-
-func TestBaseAccountValidatePassword(t *testing.T) {
-	scenarios := []struct {
-		account  models.BaseAccount
-		password string
-		expected bool
-	}{
-		{
-			// empty passwordHash + empty pass
-			models.BaseAccount{},
-			"",
-			false,
-		},
-		{
-			// empty passwordHash + nonempty pass
-			models.BaseAccount{},
-			"123456",
-			false,
-		},
-		{
-			// nonempty passwordHash + empty pass
-			models.BaseAccount{PasswordHash: "$2a$10$SKk/Y/Yc925PBtsSYBvq3Ous9Jy18m4KTn6b/PQQ.Y9QVjy3o/Fv."},
-			"",
-			false,
-		},
-		{
-			// nonempty passwordHash + wrong pass
-			models.BaseAccount{PasswordHash: "$2a$10$SKk/Y/Yc925PBtsSYBvq3Ous9Jy18m4KTn6b/PQQ.Y9QVjy3o/Fv."},
-			"654321",
-			false,
-		},
-		{
-			// nonempty passwordHash + correct pass
-			models.BaseAccount{PasswordHash: "$2a$10$SKk/Y/Yc925PBtsSYBvq3Ous9Jy18m4KTn6b/PQQ.Y9QVjy3o/Fv."},
-			"123456",
-			true,
-		},
-	}
-
-	for i, s := range scenarios {
-		result := s.account.ValidatePassword(s.password)
-		if result != s.expected {
-			t.Errorf("(%d) Expected %v, got %v", i, s.expected, result)
-		}
-	}
-}
-
-func TestBaseAccountSetPassword(t *testing.T) {
-	m := models.BaseAccount{
-		// 123456
-		PasswordHash:    "$2a$10$SKk/Y/Yc925PBtsSYBvq3Ous9Jy18m4KTn6b/PQQ.Y9QVjy3o/Fv.",
-		LastResetSentAt: types.NowDateTime(),
-		TokenKey:        "test",
-	}
-
-	// empty pass
-	err1 := m.SetPassword("")
-	if err1 == nil {
-		t.Fatal("Expected empty password error")
-	}
-
-	err2 := m.SetPassword("654321")
-	if err2 != nil {
-		t.Fatalf("Expected nil, got error %v", err2)
-	}
-
-	if !m.ValidatePassword("654321") {
-		t.Fatalf("Password is invalid")
-	}
-
-	if m.TokenKey == "test" {
-		t.Fatalf("Expected TokenKey to change, got %v", m.TokenKey)
-	}
-
-	if !m.LastResetSentAt.IsZero() {
-		t.Fatalf("Expected LastResetSentAt to be zero datetime, got %v", m.LastResetSentAt)
-	}
-}
-
-func TestBaseAccountRefreshTokenKey(t *testing.T) {
-	m := models.BaseAccount{TokenKey: "test"}
-
-	m.RefreshTokenKey()
-
-	// empty pass
-	if m.TokenKey == "" || m.TokenKey == "test" {
-		t.Fatalf("Expected TokenKey to change, got %q", m.TokenKey)
 	}
 }

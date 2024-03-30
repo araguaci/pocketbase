@@ -1,5 +1,5 @@
 run:
-  go: 1.18
+  go: 1.21
   concurrency: 4
   timeout: 10m
 
@@ -7,10 +7,8 @@ linters:
   disable-all: true
   enable:
     - asciicheck
-    - deadcode
     - depguard
     - exportloopref
-    - gocritic
     - gofmt
     - goimports
     - gomodguard
@@ -26,5 +24,4 @@ linters:
     - typecheck
     - unconvert
     - unused
-    - varcheck
     - whitespace

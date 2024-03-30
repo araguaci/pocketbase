@@ -1,11 +1,14 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"strconv"
 
+	"github.com/pocketbase/pocketbase/tools/types"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/github"
 )
 
 var _ Provider = (*Github)(nil)
@@ -21,67 +24,109 @@ type Github struct {
 // NewGithubProvider creates new Github provider instance with some defaults.
 func NewGithubProvider() *Github {
 	return &Github{&baseProvider{
-		scopes:     []string{"user"},
-		authUrl:    "https://github.com/login/oauth/authorize",
-		tokenUrl:   "https://github.com/login/oauth/access_token",
-		userApiUrl: "https://api.github.com/user",
+		ctx:         context.Background(),
+		displayName: "GitHub",
+		pkce:        true, // technically is not supported yet but it is safe as the PKCE params are just ignored
+		scopes:      []string{"read:user", "user:email"},
+		authUrl:     github.Endpoint.AuthURL,
+		tokenUrl:    github.Endpoint.TokenURL,
+		userApiUrl:  "https://api.github.com/user",
 	}}
 }
 
 // FetchAuthUser returns an AuthUser instance based the Github's user api.
+//
+// API reference: https://docs.github.com/en/rest/reference/users#get-the-authenticated-user
 func (p *Github) FetchAuthUser(token *oauth2.Token) (*AuthUser, error) {
-	// https://docs.github.com/en/rest/reference/users#get-the-authenticated-user
-	rawData := struct {
+	data, err := p.FetchRawUserData(token)
+	if err != nil {
+		return nil, err
+	}
+
+	rawUser := map[string]any{}
+	if err := json.Unmarshal(data, &rawUser); err != nil {
+		return nil, err
+	}
+
+	extracted := struct {
+		Login     string `json:"login"`
 		Id        int    `json:"id"`
 		Name      string `json:"name"`
 		Email     string `json:"email"`
 		AvatarUrl string `json:"avatar_url"`
 	}{}
-
-	if err := p.FetchRawUserData(token, &rawData); err != nil {
+	if err := json.Unmarshal(data, &extracted); err != nil {
 		return nil, err
 	}
 
 	user := &AuthUser{
-		Id:        strconv.Itoa(rawData.Id),
-		Name:      rawData.Name,
-		Email:     rawData.Email,
-		AvatarUrl: rawData.AvatarUrl,
+		Id:           strconv.Itoa(extracted.Id),
+		Name:         extracted.Name,
+		Username:     extracted.Login,
+		Email:        extracted.Email,
+		AvatarUrl:    extracted.AvatarUrl,
+		RawUser:      rawUser,
+		AccessToken:  token.AccessToken,
+		RefreshToken: token.RefreshToken,
 	}
 
-	// in case user set "Keep my email address private",
-	// email should be retrieved via extra API request
+	user.Expiry, _ = types.ParseDateTime(token.Expiry)
+
+	// in case user has set "Keep my email address private", send an
+	// **optional** API request to retrieve the verified primary email
 	if user.Email == "" {
-		client := p.Client(token)
-
-		response, err := client.Get(p.userApiUrl + "/emails")
+		email, err := p.fetchPrimaryEmail(token)
 		if err != nil {
-			return user, err
+			return nil, err
 		}
-		defer response.Body.Close()
-
-		content, err := ioutil.ReadAll(response.Body)
-		if err != nil {
-			return user, err
-		}
-
-		emails := []struct {
-			Email    string
-			Verified bool
-			Primary  bool
-		}{}
-		if err := json.Unmarshal(content, &emails); err != nil {
-			return user, err
-		}
-
-		// extract the verified primary email
-		for _, email := range emails {
-			if email.Verified && email.Primary {
-				user.Email = email.Email
-				break
-			}
-		}
+		user.Email = email
 	}
 
 	return user, nil
+}
+
+// fetchPrimaryEmail sends an API request to retrieve the verified
+// primary email, in case "Keep my email address private" was set.
+//
+// NB! This method can succeed and still return an empty email.
+// Error responses that are result of insufficient scopes permissions are ignored.
+//
+// API reference: https://docs.github.com/en/rest/users/emails?apiVersion=2022-11-28
+func (p *Github) fetchPrimaryEmail(token *oauth2.Token) (string, error) {
+	client := p.Client(token)
+
+	response, err := client.Get(p.userApiUrl + "/emails")
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+
+	// ignore common http errors caused by insufficient scope permissions
+	// (the email field is optional, aka. return the auth user without it)
+	if response.StatusCode == 401 || response.StatusCode == 403 || response.StatusCode == 404 {
+		return "", nil
+	}
+
+	content, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+
+	emails := []struct {
+		Email    string
+		Verified bool
+		Primary  bool
+	}{}
+	if err := json.Unmarshal(content, &emails); err != nil {
+		return "", err
+	}
+
+	// extract the verified primary email
+	for _, email := range emails {
+		if email.Verified && email.Primary {
+			return email.Email, nil
+		}
+	}
+
+	return "", nil
 }

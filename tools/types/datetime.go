@@ -9,7 +9,7 @@ import (
 )
 
 // DefaultDateLayout specifies the default app date strings layout.
-const DefaultDateLayout = "2006-01-02 15:04:05.000"
+const DefaultDateLayout = "2006-01-02 15:04:05.000Z"
 
 // NowDateTime returns new DateTime instance with the current local time.
 func NowDateTime() DateTime {
@@ -40,20 +40,21 @@ func (d DateTime) IsZero() bool {
 	return d.Time().IsZero()
 }
 
-// String serializes the current DateTime instance into a formated
+// String serializes the current DateTime instance into a formatted
 // UTC date string.
 //
 // The zero value is serialized to an empty string.
 func (d DateTime) String() string {
-	if d.IsZero() {
+	t := d.Time()
+	if t.IsZero() {
 		return ""
 	}
-	return d.Time().UTC().Format(DefaultDateLayout)
+	return t.UTC().Format(DefaultDateLayout)
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.
 func (d DateTime) MarshalJSON() ([]byte, error) {
-	return json.Marshal(d.String())
+	return []byte(`"` + d.String() + `"`), nil
 }
 
 // UnmarshalJSON implements the [json.Unmarshaler] interface.
@@ -74,11 +75,22 @@ func (d DateTime) Value() (driver.Value, error) {
 // into the current DateTime instance.
 func (d *DateTime) Scan(value any) error {
 	switch v := value.(type) {
-	case DateTime:
-		d.t = v.Time()
 	case time.Time:
 		d.t = v
-	case int:
+	case DateTime:
+		d.t = v.Time()
+	case string:
+		if v == "" {
+			d.t = time.Time{}
+		} else {
+			t, err := time.Parse(DefaultDateLayout, v)
+			if err != nil {
+				// check for other common date layouts
+				t = cast.ToTime(v)
+			}
+			d.t = t
+		}
+	case int, int64, int32, uint, uint64, uint32:
 		d.t = cast.ToTime(v)
 	default:
 		str := cast.ToString(v)

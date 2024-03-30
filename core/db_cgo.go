@@ -3,24 +3,48 @@
 package core
 
 import (
-	"fmt"
+	"database/sql"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
 	"github.com/pocketbase/dbx"
 )
 
-func connectDB(dbPath string) (*dbx.DB, error) {
-	pragmas := "_foreign_keys=1&_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=8000"
+func init() {
+	// Registers the sqlite3 driver with a ConnectHook so that we can
+	// initialize the default PRAGMAs.
+	//
+	// Note 1: we don't define the PRAGMA as part of the dsn string
+	// because not all pragmas are available.
+	//
+	// Note 2: the busy_timeout pragma must be first because
+	// the connection needs to be set to block on busy before WAL mode
+	// is set in case it hasn't been already set by another connection.
+	sql.Register("pb_sqlite3",
+		&sqlite3.SQLiteDriver{
+			ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+				_, err := conn.Exec(`
+					PRAGMA busy_timeout       = 10000;
+					PRAGMA journal_mode       = WAL;
+					PRAGMA journal_size_limit = 200000000;
+					PRAGMA synchronous        = NORMAL;
+					PRAGMA foreign_keys       = ON;
+					PRAGMA temp_store         = MEMORY;
+					PRAGMA cache_size         = -16000;
+				`, nil)
 
-	db, openErr := dbx.MustOpen("sqlite3", fmt.Sprintf("%s?%s", dbPath, pragmas))
-	if openErr != nil {
-		return nil, openErr
+				return err
+			},
+		},
+	)
+
+	dbx.BuilderFuncMap["pb_sqlite3"] = dbx.BuilderFuncMap["sqlite3"]
+}
+
+func connectDB(dbPath string) (*dbx.DB, error) {
+	db, err := dbx.Open("pb_sqlite3", dbPath)
+	if err != nil {
+		return nil, err
 	}
 
-	// additional pragmas not supported through the dsn string
-	_, err := db.NewQuery(`
-		pragma journal_size_limit = 100000000;
-	`).Execute()
-
-	return db, err
+	return db, nil
 }

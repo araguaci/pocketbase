@@ -2,18 +2,16 @@ package migrate
 
 import (
 	"fmt"
-	"os"
-	"path"
+	"strings"
 	"time"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/fatih/color"
 	"github.com/pocketbase/dbx"
-	"github.com/pocketbase/pocketbase/tools/inflector"
 	"github.com/spf13/cast"
 )
 
-const migrationsTable = "_migrations"
+const DefaultMigrationsTable = "_migrations"
 
 // Runner defines a simple struct for managing the execution of db migrations.
 type Runner struct {
@@ -27,7 +25,7 @@ func NewRunner(db *dbx.DB, migrationsList MigrationsList) (*Runner, error) {
 	runner := &Runner{
 		db:             db,
 		migrationsList: migrationsList,
-		tableName:      migrationsTable,
+		tableName:      DefaultMigrationsTable,
 	}
 
 	if err := runner.createMigrationsTable(); err != nil {
@@ -40,9 +38,8 @@ func NewRunner(db *dbx.DB, migrationsList MigrationsList) (*Runner, error) {
 // Run interactively executes the current runner with the provided args.
 //
 // The following commands are supported:
-// - up                        - applies all migrations
-// - down [n]                  - reverts the last n applied migrations
-// - create NEW_MIGRATION_NAME - create NEW_MIGRATION_NAME.go file from a migration template
+// - up       - applies all migrations
+// - down [n] - reverts the last n applied migrations
 func (r *Runner) Run(args ...string) error {
 	cmd := "up"
 	if len(args) > 0 {
@@ -53,7 +50,6 @@ func (r *Runner) Run(args ...string) error {
 	case "up":
 		applied, err := r.Up()
 		if err != nil {
-			color.Red(err.Error())
 			return err
 		}
 
@@ -76,9 +72,18 @@ func (r *Runner) Run(args ...string) error {
 			}
 		}
 
+		names, err := r.lastAppliedMigrations(toRevertCount)
+		if err != nil {
+			return err
+		}
+
 		confirm := false
 		prompt := &survey.Confirm{
-			Message: fmt.Sprintf("Do you really want to revert the last %d applied migration(s)?", toRevertCount),
+			Message: fmt.Sprintf(
+				"\n%v\nDo you really want to revert the last %d applied migration(s)?",
+				strings.Join(names, "\n"),
+				toRevertCount,
+			),
 		}
 		survey.AskOne(prompt, &confirm)
 		if !confirm {
@@ -88,7 +93,6 @@ func (r *Runner) Run(args ...string) error {
 
 		reverted, err := r.Down(toRevertCount)
 		if err != nil {
-			color.Red(err.Error())
 			return err
 		}
 
@@ -101,56 +105,12 @@ func (r *Runner) Run(args ...string) error {
 		}
 
 		return nil
-	case "create":
-		if len(args) < 2 {
-			return fmt.Errorf("Missing migration file name")
-		}
-
-		name := args[1]
-
-		var dir string
-		if len(args) == 3 {
-			dir = args[2]
-		}
-		if dir == "" {
-			// If not specified, auto point to the default migrations folder.
-			//
-			// NB!
-			// Since the create command makes sense only during development,
-			// it is expected the user to be in the app working directory
-			// and to be using `go run ...`
-			wd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			dir = path.Join(wd, "migrations")
-		}
-
-		resultFilePath := path.Join(
-			dir,
-			fmt.Sprintf("%d_%s.go", time.Now().Unix(), inflector.Snakecase(name)),
-		)
-
-		confirm := false
-		prompt := &survey.Confirm{
-			Message: fmt.Sprintf("Do you really want to create migration %q?", resultFilePath),
-		}
-		survey.AskOne(prompt, &confirm)
-		if !confirm {
-			fmt.Println("The command has been cancelled")
-			return nil
-		}
-
-		// ensure that migrations dir exist
-		if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+	case "history-sync":
+		if err := r.removeMissingAppliedMigrations(); err != nil {
 			return err
 		}
 
-		if err := os.WriteFile(resultFilePath, []byte(createTemplateContent), 0644); err != nil {
-			return fmt.Errorf("Failed to save migration file %q\n", resultFilePath)
-		}
-
-		fmt.Printf("Successfully created file %q\n", resultFilePath)
+		color.Green("The %s table was synced with the available migrations.", r.tableName)
 		return nil
 	default:
 		return fmt.Errorf("Unsupported command: %q\n", cmd)
@@ -166,19 +126,22 @@ func (r *Runner) Up() ([]string, error) {
 	err := r.db.Transactional(func(tx *dbx.Tx) error {
 		for _, m := range r.migrationsList.Items() {
 			// skip applied
-			if r.isMigrationApplied(tx, m.file) {
+			if r.isMigrationApplied(tx, m.File) {
 				continue
 			}
 
-			if err := m.up(tx); err != nil {
-				return fmt.Errorf("Failed to apply migration %s: %w", m.file, err)
+			// ignore empty Up action
+			if m.Up != nil {
+				if err := m.Up(tx); err != nil {
+					return fmt.Errorf("Failed to apply migration %s: %w", m.File, err)
+				}
 			}
 
-			if err := r.saveAppliedMigration(tx, m.file); err != nil {
-				return fmt.Errorf("Failed to save applied migration info for %s: %w", m.file, err)
+			if err := r.saveAppliedMigration(tx, m.File); err != nil {
+				return fmt.Errorf("Failed to save applied migration info for %s: %w", m.File, err)
 			}
 
-			applied = append(applied, m.file)
+			applied = append(applied, m.File)
 		}
 
 		return nil
@@ -190,37 +153,43 @@ func (r *Runner) Up() ([]string, error) {
 	return applied, nil
 }
 
-// Down reverts the last `toRevertCount` applied migrations.
+// Down reverts the last `toRevertCount` applied migrations
+// (in the order they were applied).
 //
 // On success returns list with the reverted migrations file names.
 func (r *Runner) Down(toRevertCount int) ([]string, error) {
-	applied := []string{}
+	reverted := make([]string, 0, toRevertCount)
+
+	names, appliedErr := r.lastAppliedMigrations(toRevertCount)
+	if appliedErr != nil {
+		return nil, appliedErr
+	}
 
 	err := r.db.Transactional(func(tx *dbx.Tx) error {
-		totalReverted := 0
+		for _, name := range names {
+			for _, m := range r.migrationsList.Items() {
+				if m.File != name {
+					continue
+				}
 
-		for i := len(r.migrationsList.Items()) - 1; i >= 0; i-- {
-			m := r.migrationsList.Item(i)
+				// revert limit reached
+				if toRevertCount-len(reverted) <= 0 {
+					return nil
+				}
 
-			// skip unapplied
-			if !r.isMigrationApplied(tx, m.file) {
-				continue
+				// ignore empty Down action
+				if m.Down != nil {
+					if err := m.Down(tx); err != nil {
+						return fmt.Errorf("Failed to revert migration %s: %w", m.File, err)
+					}
+				}
+
+				if err := r.saveRevertedMigration(tx, m.File); err != nil {
+					return fmt.Errorf("Failed to save reverted migration info for %s: %w", m.File, err)
+				}
+
+				reverted = append(reverted, m.File)
 			}
-
-			// revert limit reached
-			if toRevertCount-totalReverted <= 0 {
-				break
-			}
-
-			if err := m.down(tx); err != nil {
-				return fmt.Errorf("Failed to revert migration %s: %w", m.file, err)
-			}
-
-			if err := r.saveRevertedMigration(tx, m.file); err != nil {
-				return fmt.Errorf("Failed to save reverted migration info for %s: %w", m.file, err)
-			}
-
-			applied = append(applied, m.file)
 		}
 
 		return nil
@@ -229,7 +198,8 @@ func (r *Runner) Down(toRevertCount int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return applied, nil
+
+	return reverted, nil
 }
 
 func (r *Runner) createMigrationsTable() error {
@@ -258,7 +228,7 @@ func (r *Runner) isMigrationApplied(tx dbx.Builder, file string) bool {
 func (r *Runner) saveAppliedMigration(tx dbx.Builder, file string) error {
 	_, err := tx.Insert(r.tableName, dbx.Params{
 		"file":    file,
-		"applied": time.Now().Unix(),
+		"applied": time.Now().UnixMicro(),
 	}).Execute()
 
 	return err
@@ -266,6 +236,40 @@ func (r *Runner) saveAppliedMigration(tx dbx.Builder, file string) error {
 
 func (r *Runner) saveRevertedMigration(tx dbx.Builder, file string) error {
 	_, err := tx.Delete(r.tableName, dbx.HashExp{"file": file}).Execute()
+
+	return err
+}
+
+func (r *Runner) lastAppliedMigrations(limit int) ([]string, error) {
+	var files = make([]string, 0, limit)
+
+	err := r.db.Select("file").
+		From(r.tableName).
+		Where(dbx.Not(dbx.HashExp{"applied": nil})).
+		// unify microseconds and seconds applied time for backward compatibility
+		OrderBy("substr(applied||'0000000000000000', 0, 17) DESC").
+		AndOrderBy("file DESC").
+		Limit(int64(limit)).
+		Column(&files)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
+func (r *Runner) removeMissingAppliedMigrations() error {
+	loadedMigrations := r.migrationsList.Items()
+
+	names := make([]any, len(loadedMigrations))
+	for i, migration := range loadedMigrations {
+		names[i] = migration.File
+	}
+
+	_, err := r.db.Delete(r.tableName, dbx.Not(dbx.HashExp{
+		"file": names,
+	})).Execute()
 
 	return err
 }

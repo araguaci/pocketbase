@@ -1,11 +1,13 @@
 <script>
+    import { onMount } from "svelte";
+
     export let value = "";
     export let maxHeight = 200;
 
     let inputElem;
     let updateTimeoutId;
 
-    $: if (inputElem && typeof value !== undefined) {
+    $: if (typeof value !== undefined) {
         updateInputHeight();
     }
 
@@ -14,7 +16,7 @@
         updateTimeoutId = setTimeout(() => {
             if (inputElem) {
                 inputElem.style.height = ""; // reset
-                inputElem.style.height = Math.min(inputElem.scrollHeight + 2, maxHeight) + "px";
+                inputElem.style.height = Math.min(inputElem.scrollHeight, maxHeight) + "px";
             }
         }, 0);
     }
@@ -24,7 +26,7 @@
     //
     // note: New line could be added using "Enter+Shift".
     function handleKeydown(e) {
-        if (e?.code === "Enter" && !e?.shiftKey) {
+        if (e?.code === "Enter" && !e?.shiftKey && !e?.isComposing) {
             e.preventDefault();
 
             // trigger parent form submission (if any)
@@ -32,6 +34,12 @@
             form?.requestSubmit && form.requestSubmit();
         }
     }
+
+    onMount(() => {
+        updateInputHeight();
+
+        return () => clearTimeout(updateTimeoutId);
+    });
 </script>
 
 <textarea bind:this={inputElem} bind:value on:keydown={handleKeydown} {...$$restProps} />

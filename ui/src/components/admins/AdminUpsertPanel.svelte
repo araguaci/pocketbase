@@ -1,7 +1,6 @@
 <script>
     import { createEventDispatcher } from "svelte";
     import { slide } from "svelte/transition";
-    import { Admin } from "pocketbase";
     import CommonHelper from "@/utils/CommonHelper";
     import ApiClient from "@/utils/ApiClient";
     import { setErrors } from "@/stores/errors";
@@ -9,13 +8,15 @@
     import { addSuccessToast } from "@/stores/toasts";
     import Field from "@/components/base/Field.svelte";
     import Toggler from "@/components/base/Toggler.svelte";
+    import ModelDateIcon from "@/components/base/ModelDateIcon.svelte";
     import OverlayPanel from "@/components/base/OverlayPanel.svelte";
+    import SecretGeneratorButton from "@/components/base/SecretGeneratorButton.svelte";
 
     const dispatch = createEventDispatcher();
     const formId = "admin_" + CommonHelper.randomString(5);
 
     let panel;
-    let admin = new Admin();
+    let admin = {};
     let isSaving = false;
     let confirmClose = false; // prevent close recursion
     let avatar = 0;
@@ -24,11 +25,10 @@
     let passwordConfirm = "";
     let changePasswordToggle = false;
 
+    $: isNew = !admin?.id;
+
     $: hasChanges =
-        (admin.isNew && email != "") ||
-        changePasswordToggle ||
-        email !== admin.email ||
-        avatar !== admin.avatar;
+        (isNew && email != "") || changePasswordToggle || email !== admin.email || avatar !== admin.avatar;
 
     export function show(model) {
         load(model);
@@ -43,8 +43,7 @@
     }
 
     function load(model) {
-        setErrors({}); // reset errors
-        admin = model?.clone ? model.clone() : new Admin();
+        admin = structuredClone(model || {});
         reset(); // reset form
     }
 
@@ -54,6 +53,7 @@
         avatar = admin?.avatar || 0;
         password = "";
         passwordConfirm = "";
+        setErrors({}); // reset errors
     }
 
     function save() {
@@ -64,31 +64,32 @@
         isSaving = true;
 
         const data = { email, avatar };
-        if (admin.isNew || changePasswordToggle) {
+        if (isNew || changePasswordToggle) {
             data["password"] = password;
             data["passwordConfirm"] = passwordConfirm;
         }
 
         let request;
-        if (admin.isNew) {
-            request = ApiClient.Admins.create(data);
+        if (isNew) {
+            request = ApiClient.admins.create(data);
         } else {
-            request = ApiClient.Admins.update(admin.id, data);
+            request = ApiClient.admins.update(admin.id, data);
         }
 
         request
             .then(async (result) => {
                 confirmClose = false;
                 hide();
-                addSuccessToast(admin.isNew ? "Successfully created admin." : "Successfully updated admin.");
-                dispatch("save", result);
+                addSuccessToast(isNew ? "Successfully created admin." : "Successfully updated admin.");
 
-                if (ApiClient.AuthStore.model?.id === result.id) {
-                    ApiClient.AuthStore.save(ApiClient.AuthStore.token, result);
+                if (ApiClient.authStore.model?.id === result.id) {
+                    ApiClient.authStore.save(ApiClient.authStore.token, result);
                 }
+
+                dispatch("save", result);
             })
             .catch((err) => {
-                ApiClient.errorResponseHandler(err);
+                ApiClient.error(err);
             })
             .finally(() => {
                 isSaving = false;
@@ -101,7 +102,8 @@
         }
 
         confirm(`Do you really want to delete the selected admin?`, () => {
-            return ApiClient.Admins.delete(admin.id)
+            return ApiClient.admins
+                .delete(admin.id)
                 .then(() => {
                     confirmClose = false;
                     hide();
@@ -109,7 +111,7 @@
                     dispatch("delete", admin);
                 })
                 .catch((err) => {
-                    ApiClient.errorResponseHandler(err);
+                    ApiClient.error(err);
                 });
         });
     }
@@ -134,18 +136,21 @@
 >
     <svelte:fragment slot="header">
         <h4>
-            {admin.isNew ? "New admin" : "Edit admin"}
+            {isNew ? "New admin" : "Edit admin"}
         </h4>
     </svelte:fragment>
 
     <form id={formId} class="grid" autocomplete="off" on:submit|preventDefault={save}>
-        {#if !admin.isNew}
-            <Field class="form-field disabled" name="id" let:uniqueId>
+        {#if !isNew}
+            <Field class="form-field readonly" name="id" let:uniqueId>
                 <label for={uniqueId}>
                     <i class={CommonHelper.getFieldTypeIcon("primary")} />
-                    <span class="txt">ID</span>
+                    <span class="txt">id</span>
                 </label>
-                <input type="text" id={uniqueId} value={admin.id} disabled />
+                <div class="form-field-addon">
+                    <ModelDateIcon model={admin} />
+                </div>
+                <input type="text" id={uniqueId} value={admin.id} readonly />
             </Field>
         {/if}
 
@@ -153,22 +158,16 @@
             <p class="section-title">Avatar</p>
             <div class="flex flex-gap-xs flex-wrap">
                 {#each [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as index}
-                    <figure
-                        tabindex="0"
-                        class="link-fade thumb thumb-circle {index == avatar ? 'thumb-active' : 'thumb-sm'}"
+                    <button
+                        type="button"
+                        class="link-fade thumb thumb-circle {index == avatar ? 'thumb-primary' : 'thumb-sm'}"
                         on:click={() => (avatar = index)}
-                        on:keydown={(e) => {
-                            if (e.code === "Enter" || e.code === "Space") {
-                                e.preventDefault();
-                                avatar = index;
-                            }
-                        }}
                     >
                         <img
                             src="{import.meta.env.BASE_URL}images/avatars/avatar{index}.svg"
                             alt="Avatar {index}"
                         />
-                    </figure>
+                    </button>
                 {/each}
             </div>
         </div>
@@ -181,14 +180,14 @@
             <input type="email" autocomplete="off" id={uniqueId} required bind:value={email} />
         </Field>
 
-        {#if !admin.isNew}
+        {#if !isNew}
             <Field class="form-field form-field-toggle" let:uniqueId>
                 <input type="checkbox" id={uniqueId} bind:checked={changePasswordToggle} />
                 <label for={uniqueId}>Change password</label>
             </Field>
         {/if}
 
-        {#if admin.isNew || changePasswordToggle}
+        {#if isNew || changePasswordToggle}
             <div class="col-12">
                 <div class="grid" transition:slide={{ duration: 150 }}>
                     <div class="col-sm-6">
@@ -204,6 +203,9 @@
                                 required
                                 bind:value={password}
                             />
+                            <div class="form-field-addon">
+                                <SecretGeneratorButton />
+                            </div>
                         </Field>
                     </div>
                     <div class="col-sm-6">
@@ -227,22 +229,32 @@
     </form>
 
     <svelte:fragment slot="footer">
-        {#if !admin.isNew}
-            <button type="button" class="btn btn-sm btn-circle btn-secondary">
+        {#if !isNew}
+            <div
+                tabindex="0"
+                role="button"
+                aria-label="More admin options"
+                class="btn btn-sm btn-circle btn-transparent"
+            >
                 <!-- empty span for alignment -->
-                <span />
-                <i class="ri-more-line" />
+                <span aria-hidden="true" />
+                <i class="ri-more-line" aria-hidden="true" />
                 <Toggler class="dropdown dropdown-upside dropdown-left dropdown-nowrap">
-                    <button type="button" class="dropdown-item" on:click={() => deleteConfirm()}>
-                        <i class="ri-delete-bin-7-line" />
+                    <button
+                        type="button"
+                        class="dropdown-item txt-danger"
+                        role="menuitem"
+                        on:click={() => deleteConfirm()}
+                    >
+                        <i class="ri-delete-bin-7-line" aria-hidden="true" />
                         <span class="txt">Delete</span>
                     </button>
                 </Toggler>
-            </button>
+            </div>
             <div class="flex-fill" />
         {/if}
 
-        <button type="button" class="btn btn-secondary" disabled={isSaving} on:click={() => hide()}>
+        <button type="button" class="btn btn-transparent" disabled={isSaving} on:click={() => hide()}>
             <span class="txt">Cancel</span>
         </button>
         <button
@@ -252,7 +264,7 @@
             class:btn-loading={isSaving}
             disabled={!hasChanges || isSaving}
         >
-            <span class="txt">{admin.isNew ? "Create" : "Save changes"}</span>
+            <span class="txt">{isNew ? "Create" : "Save changes"}</span>
         </button>
     </svelte:fragment>
 </OverlayPanel>

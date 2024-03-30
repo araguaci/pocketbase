@@ -8,11 +8,14 @@ import (
 
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase/forms"
+	"github.com/pocketbase/pocketbase/models/settings"
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/security"
 )
 
 func TestNewSettingsUpsert(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -28,29 +31,9 @@ func TestNewSettingsUpsert(t *testing.T) {
 	}
 }
 
-func TestSettingsUpsertValidate(t *testing.T) {
-	app, _ := tests.NewTestApp()
-	defer app.Cleanup()
+func TestSettingsUpsertValidateAndSubmit(t *testing.T) {
+	t.Parallel()
 
-	form := forms.NewSettingsUpsert(app)
-
-	// check if settings validations are triggered
-	// (there are already individual tests for each setting)
-	form.Meta.AppName = ""
-	form.Logs.MaxDays = -10
-
-	// parse errors
-	err := form.Validate()
-	jsonResult, _ := json.Marshal(err)
-
-	expected := `{"logs":{"maxDays":"must be no less than 0"},"meta":{"appName":"cannot be blank"}}`
-
-	if string(jsonResult) != expected {
-		t.Errorf("Expected %v, got %v", expected, string(jsonResult))
-	}
-}
-
-func TestSettingsUpsertSubmit(t *testing.T) {
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -65,19 +48,19 @@ func TestSettingsUpsertSubmit(t *testing.T) {
 		{"{}", true, nil},
 		// failure - invalid data
 		{
-			`{"emailAuth": {"minPasswordLength": 1}, "logs": {"maxDays": -1}}`,
+			`{"meta": {"appName": ""}, "logs": {"maxDays": -1}}`,
 			false,
-			[]string{"emailAuth", "logs"},
+			[]string{"meta", "logs"},
 		},
 		// success - valid data (plain)
 		{
-			`{"emailAuth": {"minPasswordLength": 6}, "logs": {"maxDays": 0}}`,
+			`{"meta": {"appName": "test"}, "logs": {"maxDays": 0}}`,
 			false,
 			nil,
 		},
 		// success - valid data (encrypt)
 		{
-			`{"emailAuth": {"minPasswordLength": 6}, "logs": {"maxDays": 0}}`,
+			`{"meta": {"appName": "test"}, "logs": {"maxDays": 7}}`,
 			true,
 			nil,
 		},
@@ -100,10 +83,10 @@ func TestSettingsUpsertSubmit(t *testing.T) {
 		}
 
 		interceptorCalls := 0
-		interceptor := func(next forms.InterceptorNextFunc) forms.InterceptorNextFunc {
-			return func() error {
+		interceptor := func(next forms.InterceptorNextFunc[*settings.Settings]) forms.InterceptorNextFunc[*settings.Settings] {
+			return func(s *settings.Settings) error {
 				interceptorCalls++
-				return next()
+				return next(s)
 			}
 		}
 
@@ -148,6 +131,8 @@ func TestSettingsUpsertSubmit(t *testing.T) {
 }
 
 func TestSettingsUpsertSubmitInterceptors(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -157,16 +142,16 @@ func TestSettingsUpsertSubmitInterceptors(t *testing.T) {
 	testErr := errors.New("test_error")
 
 	interceptor1Called := false
-	interceptor1 := func(next forms.InterceptorNextFunc) forms.InterceptorNextFunc {
-		return func() error {
+	interceptor1 := func(next forms.InterceptorNextFunc[*settings.Settings]) forms.InterceptorNextFunc[*settings.Settings] {
+		return func(s *settings.Settings) error {
 			interceptor1Called = true
-			return next()
+			return next(s)
 		}
 	}
 
 	interceptor2Called := false
-	interceptor2 := func(next forms.InterceptorNextFunc) forms.InterceptorNextFunc {
-		return func() error {
+	interceptor2 := func(next forms.InterceptorNextFunc[*settings.Settings]) forms.InterceptorNextFunc[*settings.Settings] {
+		return func(s *settings.Settings) error {
 			interceptor2Called = true
 			return testErr
 		}

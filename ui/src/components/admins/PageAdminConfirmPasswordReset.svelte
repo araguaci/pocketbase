@@ -22,11 +22,11 @@
         isLoading = true;
 
         try {
-            await ApiClient.Admins.confirmPasswordReset(params?.token, newPassword, newPasswordConfirm);
+            await ApiClient.admins.confirmPasswordReset(params?.token, newPassword, newPasswordConfirm);
             addSuccessToast("Successfully set a new admin password.");
             replace("/");
         } catch (err) {
-            ApiClient.errorResponseHandler(err);
+            ApiClient.error(err);
         }
 
         isLoading = false;

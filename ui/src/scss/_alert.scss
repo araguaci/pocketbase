@@ -34,7 +34,7 @@
         color: var(--txtHintColor);
     }
     .close {
-        $size: 30px;
+        $size: 28px;
         display: inline-flex;
         margin-right: -5px;
         width: $size;
@@ -94,14 +94,14 @@
     }
 }
 
-// toast alerts
 .toasts-wrapper {
     position: fixed;
     z-index: 999999;
     bottom: 0;
     left: 0;
+    right: 0;
     padding: 0 var(--smSpacing);
-    width: 100%;
+    width: auto;
     display: block;
     text-align: center;
     pointer-events: none;
@@ -111,5 +111,18 @@
         width: var(--smWrapperWidth);
         margin: var(--baseSpacing) auto;
         @include shadowize();
+    }
+}
+
+@media screen and (min-width: 980px) {
+    body:not(.overlay-active):has(.app-sidebar) {
+        .toasts-wrapper {
+            left: var(--appSidebarWidth);
+        }
+    }
+    body:not(.overlay-active):has(.page-sidebar) {
+        .toasts-wrapper {
+            left: calc(var(--appSidebarWidth) + var(--pageSidebarWidth));
+        }
     }
 }

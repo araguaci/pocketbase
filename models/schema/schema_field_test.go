@@ -11,27 +11,48 @@ import (
 	"github.com/pocketbase/pocketbase/tools/types"
 )
 
-func TestReservedFieldNames(t *testing.T) {
-	result := schema.ReservedFieldNames()
+func TestBaseModelFieldNames(t *testing.T) {
+	result := schema.BaseModelFieldNames()
+	expected := 3
 
-	if len(result) != 3 {
-		t.Fatalf("Expected %d names, got %d (%v)", 3, len(result), result)
+	if len(result) != expected {
+		t.Fatalf("Expected %d field names, got %d (%v)", expected, len(result), result)
+	}
+}
+
+func TestSystemFieldNames(t *testing.T) {
+	result := schema.SystemFieldNames()
+	expected := 3
+
+	if len(result) != expected {
+		t.Fatalf("Expected %d field names, got %d (%v)", expected, len(result), result)
+	}
+}
+
+func TestAuthFieldNames(t *testing.T) {
+	result := schema.AuthFieldNames()
+	expected := 8
+
+	if len(result) != expected {
+		t.Fatalf("Expected %d auth field names, got %d (%v)", expected, len(result), result)
 	}
 }
 
 func TestFieldTypes(t *testing.T) {
 	result := schema.FieldTypes()
+	expected := 11
 
-	if len(result) != 11 {
-		t.Fatalf("Expected %d types, got %d (%v)", 3, len(result), result)
+	if len(result) != expected {
+		t.Fatalf("Expected %d types, got %d (%v)", expected, len(result), result)
 	}
 }
 
 func TestArraybleFieldTypes(t *testing.T) {
 	result := schema.ArraybleFieldTypes()
+	expected := 3
 
-	if len(result) != 4 {
-		t.Fatalf("Expected %d types, got %d (%v)", 3, len(result), result)
+	if len(result) != expected {
+		t.Fatalf("Expected %d arrayble types, got %d (%v)", expected, len(result), result)
 	}
 }
 
@@ -42,47 +63,59 @@ func TestSchemaFieldColDefinition(t *testing.T) {
 	}{
 		{
 			schema.SchemaField{Type: schema.FieldTypeText, Name: "test"},
-			"TEXT DEFAULT ''",
+			"TEXT DEFAULT '' NOT NULL",
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeNumber, Name: "test"},
-			"REAL DEFAULT 0",
+			"NUMERIC DEFAULT 0 NOT NULL",
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeBool, Name: "test"},
-			"Boolean DEFAULT FALSE",
+			"BOOLEAN DEFAULT FALSE NOT NULL",
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeEmail, Name: "test"},
-			"TEXT DEFAULT ''",
+			"TEXT DEFAULT '' NOT NULL",
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeUrl, Name: "test"},
-			"TEXT DEFAULT ''",
+			"TEXT DEFAULT '' NOT NULL",
+		},
+		{
+			schema.SchemaField{Type: schema.FieldTypeEditor, Name: "test"},
+			"TEXT DEFAULT '' NOT NULL",
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeDate, Name: "test"},
-			"TEXT DEFAULT ''",
-		},
-		{
-			schema.SchemaField{Type: schema.FieldTypeSelect, Name: "test"},
-			"TEXT DEFAULT ''",
+			"TEXT DEFAULT '' NOT NULL",
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeJson, Name: "test"},
 			"JSON DEFAULT NULL",
 		},
 		{
+			schema.SchemaField{Type: schema.FieldTypeSelect, Name: "test"},
+			"TEXT DEFAULT '' NOT NULL",
+		},
+		{
+			schema.SchemaField{Type: schema.FieldTypeSelect, Name: "test_multiple", Options: &schema.SelectOptions{MaxSelect: 2}},
+			"JSON DEFAULT '[]' NOT NULL",
+		},
+		{
 			schema.SchemaField{Type: schema.FieldTypeFile, Name: "test"},
-			"TEXT DEFAULT ''",
+			"TEXT DEFAULT '' NOT NULL",
 		},
 		{
-			schema.SchemaField{Type: schema.FieldTypeRelation, Name: "test"},
-			"TEXT DEFAULT ''",
+			schema.SchemaField{Type: schema.FieldTypeFile, Name: "test_multiple", Options: &schema.FileOptions{MaxSelect: 2}},
+			"JSON DEFAULT '[]' NOT NULL",
 		},
 		{
-			schema.SchemaField{Type: schema.FieldTypeUser, Name: "test"},
-			"TEXT DEFAULT ''",
+			schema.SchemaField{Type: schema.FieldTypeRelation, Name: "test", Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			"TEXT DEFAULT '' NOT NULL",
+		},
+		{
+			schema.SchemaField{Type: schema.FieldTypeRelation, Name: "test_multiple", Options: &schema.RelationOptions{MaxSelect: nil}},
+			"JSON DEFAULT '[]' NOT NULL",
 		},
 	}
 
@@ -96,19 +129,19 @@ func TestSchemaFieldColDefinition(t *testing.T) {
 
 func TestSchemaFieldString(t *testing.T) {
 	f := schema.SchemaField{
-		Id:       "abc",
-		Name:     "test",
-		Type:     schema.FieldTypeText,
-		Required: true,
-		Unique:   false,
-		System:   true,
+		Id:          "abc",
+		Name:        "test",
+		Type:        schema.FieldTypeText,
+		Required:    true,
+		Presentable: true,
+		System:      true,
 		Options: &schema.TextOptions{
 			Pattern: "test",
 		},
 	}
 
 	result := f.String()
-	expected := `{"system":true,"id":"abc","name":"test","type":"text","required":true,"unique":false,"options":{"min":null,"max":null,"pattern":"test"}}`
+	expected := `{"system":true,"id":"abc","name":"test","type":"text","required":true,"presentable":true,"unique":false,"options":{"min":null,"max":null,"pattern":"test"}}`
 
 	if result != expected {
 		t.Errorf("Expected \n%v, got \n%v", expected, result)
@@ -123,19 +156,19 @@ func TestSchemaFieldMarshalJSON(t *testing.T) {
 		// empty
 		{
 			schema.SchemaField{},
-			`{"system":false,"id":"","name":"","type":"","required":false,"unique":false,"options":null}`,
+			`{"system":false,"id":"","name":"","type":"","required":false,"presentable":false,"unique":false,"options":null}`,
 		},
 		// without defined options
 		{
 			schema.SchemaField{
-				Id:       "abc",
-				Name:     "test",
-				Type:     schema.FieldTypeText,
-				Required: true,
-				Unique:   false,
-				System:   true,
+				Id:          "abc",
+				Name:        "test",
+				Type:        schema.FieldTypeText,
+				Required:    true,
+				Presentable: true,
+				System:      true,
 			},
-			`{"system":true,"id":"abc","name":"test","type":"text","required":true,"unique":false,"options":{"min":null,"max":null,"pattern":""}}`,
+			`{"system":true,"id":"abc","name":"test","type":"text","required":true,"presentable":true,"unique":false,"options":{"min":null,"max":null,"pattern":""}}`,
 		},
 		// with defined options
 		{
@@ -149,7 +182,7 @@ func TestSchemaFieldMarshalJSON(t *testing.T) {
 					Pattern: "test",
 				},
 			},
-			`{"system":true,"id":"","name":"test","type":"text","required":true,"unique":false,"options":{"min":null,"max":null,"pattern":"test"}}`,
+			`{"system":true,"id":"","name":"test","type":"text","required":true,"presentable":false,"unique":false,"options":{"min":null,"max":null,"pattern":"test"}}`,
 		},
 	}
 
@@ -174,32 +207,32 @@ func TestSchemaFieldUnmarshalJSON(t *testing.T) {
 		{
 			nil,
 			true,
-			`{"system":false,"id":"","name":"","type":"","required":false,"unique":false,"options":null}`,
+			`{"system":false,"id":"","name":"","type":"","required":false,"presentable":false,"unique":false,"options":null}`,
 		},
 		{
 			[]byte{},
 			true,
-			`{"system":false,"id":"","name":"","type":"","required":false,"unique":false,"options":null}`,
+			`{"system":false,"id":"","name":"","type":"","required":false,"presentable":false,"unique":false,"options":null}`,
 		},
 		{
 			[]byte(`{"system": true}`),
 			true,
-			`{"system":true,"id":"","name":"","type":"","required":false,"unique":false,"options":null}`,
+			`{"system":true,"id":"","name":"","type":"","required":false,"presentable":false,"unique":false,"options":null}`,
 		},
 		{
 			[]byte(`{"invalid"`),
 			true,
-			`{"system":false,"id":"","name":"","type":"","required":false,"unique":false,"options":null}`,
+			`{"system":false,"id":"","name":"","type":"","required":false,"presentable":false,"unique":false,"options":null}`,
 		},
 		{
 			[]byte(`{"type":"text","system":true}`),
 			false,
-			`{"system":true,"id":"","name":"","type":"text","required":false,"unique":false,"options":{"min":null,"max":null,"pattern":""}}`,
+			`{"system":true,"id":"","name":"","type":"text","required":false,"presentable":false,"unique":false,"options":{"min":null,"max":null,"pattern":""}}`,
 		},
 		{
 			[]byte(`{"type":"text","options":{"pattern":"test"}}`),
 			false,
-			`{"system":false,"id":"","name":"","type":"text","required":false,"unique":false,"options":{"min":null,"max":null,"pattern":"test"}}`,
+			`{"system":false,"id":"","name":"","type":"text","required":false,"presentable":false,"unique":false,"options":{"min":null,"max":null,"pattern":"test"}}`,
 		},
 	}
 
@@ -266,6 +299,15 @@ func TestSchemaFieldValidate(t *testing.T) {
 			[]string{"name"},
 		},
 		{
+			"name with _via_",
+			schema.SchemaField{
+				Type: schema.FieldTypeText,
+				Id:   "1234567890",
+				Name: "a_via_b",
+			},
+			[]string{"name"},
+		},
+		{
 			"reserved name (null)",
 			schema.SchemaField{
 				Type: schema.FieldTypeText,
@@ -293,11 +335,20 @@ func TestSchemaFieldValidate(t *testing.T) {
 			[]string{"name"},
 		},
 		{
+			"reserved name (_rowid_)",
+			schema.SchemaField{
+				Type: schema.FieldTypeText,
+				Id:   "1234567890",
+				Name: "_rowid_",
+			},
+			[]string{"name"},
+		},
+		{
 			"reserved name (id)",
 			schema.SchemaField{
 				Type: schema.FieldTypeText,
 				Id:   "1234567890",
-				Name: schema.ReservedFieldNameId,
+				Name: schema.FieldNameId,
 			},
 			[]string{"name"},
 		},
@@ -306,7 +357,7 @@ func TestSchemaFieldValidate(t *testing.T) {
 			schema.SchemaField{
 				Type: schema.FieldTypeText,
 				Id:   "1234567890",
-				Name: schema.ReservedFieldNameCreated,
+				Name: schema.FieldNameCreated,
 			},
 			[]string{"name"},
 		},
@@ -315,7 +366,34 @@ func TestSchemaFieldValidate(t *testing.T) {
 			schema.SchemaField{
 				Type: schema.FieldTypeText,
 				Id:   "1234567890",
-				Name: schema.ReservedFieldNameUpdated,
+				Name: schema.FieldNameUpdated,
+			},
+			[]string{"name"},
+		},
+		{
+			"reserved name (collectionId)",
+			schema.SchemaField{
+				Type: schema.FieldTypeText,
+				Id:   "1234567890",
+				Name: schema.FieldNameCollectionId,
+			},
+			[]string{"name"},
+		},
+		{
+			"reserved name (collectionName)",
+			schema.SchemaField{
+				Type: schema.FieldTypeText,
+				Id:   "1234567890",
+				Name: schema.FieldNameCollectionName,
+			},
+			[]string{"name"},
+		},
+		{
+			"reserved name (expand)",
+			schema.SchemaField{
+				Type: schema.FieldTypeText,
+				Id:   "1234567890",
+				Name: schema.FieldNameExpand,
 			},
 			[]string{"name"},
 		},
@@ -401,67 +479,72 @@ func TestSchemaFieldInitOptions(t *testing.T) {
 		{
 			schema.SchemaField{},
 			true,
-			`{"system":false,"id":"","name":"","type":"","required":false,"unique":false,"options":null}`,
+			`{"system":false,"id":"","name":"","type":"","required":false,"presentable":false,"unique":false,"options":null}`,
 		},
 		{
 			schema.SchemaField{Type: "unknown"},
 			true,
-			`{"system":false,"id":"","name":"","type":"unknown","required":false,"unique":false,"options":null}`,
+			`{"system":false,"id":"","name":"","type":"unknown","required":false,"presentable":false,"unique":false,"options":null}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeText},
 			false,
-			`{"system":false,"id":"","name":"","type":"text","required":false,"unique":false,"options":{"min":null,"max":null,"pattern":""}}`,
+			`{"system":false,"id":"","name":"","type":"text","required":false,"presentable":false,"unique":false,"options":{"min":null,"max":null,"pattern":""}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeNumber},
 			false,
-			`{"system":false,"id":"","name":"","type":"number","required":false,"unique":false,"options":{"min":null,"max":null}}`,
+			`{"system":false,"id":"","name":"","type":"number","required":false,"presentable":false,"unique":false,"options":{"min":null,"max":null,"noDecimal":false}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeBool},
 			false,
-			`{"system":false,"id":"","name":"","type":"bool","required":false,"unique":false,"options":{}}`,
+			`{"system":false,"id":"","name":"","type":"bool","required":false,"presentable":false,"unique":false,"options":{}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeEmail},
 			false,
-			`{"system":false,"id":"","name":"","type":"email","required":false,"unique":false,"options":{"exceptDomains":null,"onlyDomains":null}}`,
+			`{"system":false,"id":"","name":"","type":"email","required":false,"presentable":false,"unique":false,"options":{"exceptDomains":null,"onlyDomains":null}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeUrl},
 			false,
-			`{"system":false,"id":"","name":"","type":"url","required":false,"unique":false,"options":{"exceptDomains":null,"onlyDomains":null}}`,
+			`{"system":false,"id":"","name":"","type":"url","required":false,"presentable":false,"unique":false,"options":{"exceptDomains":null,"onlyDomains":null}}`,
+		},
+		{
+			schema.SchemaField{Type: schema.FieldTypeEditor},
+			false,
+			`{"system":false,"id":"","name":"","type":"editor","required":false,"presentable":false,"unique":false,"options":{"convertUrls":false}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeDate},
 			false,
-			`{"system":false,"id":"","name":"","type":"date","required":false,"unique":false,"options":{"min":"","max":""}}`,
+			`{"system":false,"id":"","name":"","type":"date","required":false,"presentable":false,"unique":false,"options":{"min":"","max":""}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeSelect},
 			false,
-			`{"system":false,"id":"","name":"","type":"select","required":false,"unique":false,"options":{"maxSelect":0,"values":null}}`,
+			`{"system":false,"id":"","name":"","type":"select","required":false,"presentable":false,"unique":false,"options":{"maxSelect":0,"values":null}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeJson},
 			false,
-			`{"system":false,"id":"","name":"","type":"json","required":false,"unique":false,"options":{}}`,
+			`{"system":false,"id":"","name":"","type":"json","required":false,"presentable":false,"unique":false,"options":{"maxSize":0}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeFile},
 			false,
-			`{"system":false,"id":"","name":"","type":"file","required":false,"unique":false,"options":{"maxSelect":0,"maxSize":0,"mimeTypes":null,"thumbs":null}}`,
+			`{"system":false,"id":"","name":"","type":"file","required":false,"presentable":false,"unique":false,"options":{"mimeTypes":null,"thumbs":null,"maxSelect":0,"maxSize":0,"protected":false}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeRelation},
 			false,
-			`{"system":false,"id":"","name":"","type":"relation","required":false,"unique":false,"options":{"maxSelect":0,"collectionId":"","cascadeDelete":false}}`,
+			`{"system":false,"id":"","name":"","type":"relation","required":false,"presentable":false,"unique":false,"options":{"collectionId":"","cascadeDelete":false,"minSelect":null,"maxSelect":null,"displayFields":null}}`,
 		},
 		{
 			schema.SchemaField{Type: schema.FieldTypeUser},
 			false,
-			`{"system":false,"id":"","name":"","type":"user","required":false,"unique":false,"options":{"maxSelect":0,"cascadeDelete":false}}`,
+			`{"system":false,"id":"","name":"","type":"user","required":false,"presentable":false,"unique":false,"options":{"maxSelect":0,"cascadeDelete":false}}`,
 		},
 		{
 			schema.SchemaField{
@@ -469,21 +552,23 @@ func TestSchemaFieldInitOptions(t *testing.T) {
 				Options: &schema.TextOptions{Pattern: "test"},
 			},
 			false,
-			`{"system":false,"id":"","name":"","type":"text","required":false,"unique":false,"options":{"min":null,"max":null,"pattern":"test"}}`,
+			`{"system":false,"id":"","name":"","type":"text","required":false,"presentable":false,"unique":false,"options":{"min":null,"max":null,"pattern":"test"}}`,
 		},
 	}
 
 	for i, s := range scenarios {
-		err := s.field.InitOptions()
+		t.Run(fmt.Sprintf("s%d_%s", i, s.field.Type), func(t *testing.T) {
+			err := s.field.InitOptions()
 
-		hasErr := err != nil
-		if hasErr != s.expectError {
-			t.Errorf("(%d) Expected %v, got %v (%v)", i, s.expectError, hasErr, err)
-		}
+			hasErr := err != nil
+			if hasErr != s.expectError {
+				t.Fatalf("Expected %v, got %v (%v)", s.expectError, hasErr, err)
+			}
 
-		if s.field.String() != s.expectJson {
-			t.Errorf("(%d), Expected %v, got %v", i, s.expectJson, s.field.String())
-		}
+			if s.field.String() != s.expectJson {
+				t.Fatalf(" Expected\n%v\ngot\n%v", s.expectJson, s.field.String())
+			}
+		})
 	}
 }
 
@@ -498,32 +583,68 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 		{schema.SchemaField{Type: "unknown"}, []int{1, 2, 1}, "[1,2,1]"},
 
 		// text
-		{schema.SchemaField{Type: schema.FieldTypeText}, nil, `null`},
+		{schema.SchemaField{Type: schema.FieldTypeText}, nil, `""`},
+		{schema.SchemaField{Type: schema.FieldTypeText}, "", `""`},
 		{schema.SchemaField{Type: schema.FieldTypeText}, []int{1, 2}, `""`},
 		{schema.SchemaField{Type: schema.FieldTypeText}, "test", `"test"`},
 		{schema.SchemaField{Type: schema.FieldTypeText}, 123, `"123"`},
 
 		// email
-		{schema.SchemaField{Type: schema.FieldTypeEmail}, nil, `null`},
+		{schema.SchemaField{Type: schema.FieldTypeEmail}, nil, `""`},
+		{schema.SchemaField{Type: schema.FieldTypeEmail}, "", `""`},
 		{schema.SchemaField{Type: schema.FieldTypeEmail}, []int{1, 2}, `""`},
 		{schema.SchemaField{Type: schema.FieldTypeEmail}, "test", `"test"`},
 		{schema.SchemaField{Type: schema.FieldTypeEmail}, 123, `"123"`},
 
 		// url
-		{schema.SchemaField{Type: schema.FieldTypeUrl}, nil, `null`},
+		{schema.SchemaField{Type: schema.FieldTypeUrl}, nil, `""`},
+		{schema.SchemaField{Type: schema.FieldTypeUrl}, "", `""`},
 		{schema.SchemaField{Type: schema.FieldTypeUrl}, []int{1, 2}, `""`},
 		{schema.SchemaField{Type: schema.FieldTypeUrl}, "test", `"test"`},
 		{schema.SchemaField{Type: schema.FieldTypeUrl}, 123, `"123"`},
 
+		// editor
+		{schema.SchemaField{Type: schema.FieldTypeEditor}, nil, `""`},
+		{schema.SchemaField{Type: schema.FieldTypeEditor}, "", `""`},
+		{schema.SchemaField{Type: schema.FieldTypeEditor}, []int{1, 2}, `""`},
+		{schema.SchemaField{Type: schema.FieldTypeEditor}, "test", `"test"`},
+		{schema.SchemaField{Type: schema.FieldTypeEditor}, 123, `"123"`},
+
 		// json
 		{schema.SchemaField{Type: schema.FieldTypeJson}, nil, "null"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "null", "null"},
 		{schema.SchemaField{Type: schema.FieldTypeJson}, 123, "123"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, -123, "-123"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "123", "123"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "-123", "-123"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, 123.456, "123.456"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, -123.456, "-123.456"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "123.456", "123.456"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "-123.456", "-123.456"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "123.456 abc", `"123.456 abc"`}, // invalid numeric string
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "-a123", `"-a123"`},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, true, "true"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "true", "true"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, false, "false"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "false", "false"},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, "", `""`},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, `test`, `"test"`},
 		{schema.SchemaField{Type: schema.FieldTypeJson}, `"test"`, `"test"`},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, `{test":1}`, `"{test\":1}"`}, // invalid object string
+		{schema.SchemaField{Type: schema.FieldTypeJson}, `[1 2 3]`, `"[1 2 3]"`},      // invalid array string
+		{schema.SchemaField{Type: schema.FieldTypeJson}, map[string]int{}, `{}`},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, `{}`, `{}`},
 		{schema.SchemaField{Type: schema.FieldTypeJson}, map[string]int{"test": 123}, `{"test":123}`},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, `{"test":123}`, `{"test":123}`},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, []int{}, `[]`},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, `[]`, `[]`},
 		{schema.SchemaField{Type: schema.FieldTypeJson}, []int{1, 2, 1}, `[1,2,1]`},
+		{schema.SchemaField{Type: schema.FieldTypeJson}, `[1,2,1]`, `[1,2,1]`},
 
 		// number
-		{schema.SchemaField{Type: schema.FieldTypeNumber}, nil, "null"},
+		{schema.SchemaField{Type: schema.FieldTypeNumber}, nil, "0"},
+		{schema.SchemaField{Type: schema.FieldTypeNumber}, "", "0"},
+		{schema.SchemaField{Type: schema.FieldTypeNumber}, "test", "0"},
 		{schema.SchemaField{Type: schema.FieldTypeNumber}, 1, "1"},
 		{schema.SchemaField{Type: schema.FieldTypeNumber}, 1.5, "1.5"},
 		{schema.SchemaField{Type: schema.FieldTypeNumber}, "1.5", "1.5"},
@@ -533,25 +654,28 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 		{schema.SchemaField{Type: schema.FieldTypeBool}, 1, "true"},
 		{schema.SchemaField{Type: schema.FieldTypeBool}, 0, "false"},
 		{schema.SchemaField{Type: schema.FieldTypeBool}, "", "false"},
+		{schema.SchemaField{Type: schema.FieldTypeBool}, "test", "false"},
 		{schema.SchemaField{Type: schema.FieldTypeBool}, "false", "false"},
 		{schema.SchemaField{Type: schema.FieldTypeBool}, "true", "true"},
 		{schema.SchemaField{Type: schema.FieldTypeBool}, false, "false"},
 		{schema.SchemaField{Type: schema.FieldTypeBool}, true, "true"},
 
 		// date
-		{schema.SchemaField{Type: schema.FieldTypeDate}, nil, "null"},
+		{schema.SchemaField{Type: schema.FieldTypeDate}, nil, `""`},
 		{schema.SchemaField{Type: schema.FieldTypeDate}, "", `""`},
-		{schema.SchemaField{Type: schema.FieldTypeDate}, 1641024040, `"2022-01-01 08:00:40.000"`},
-		{schema.SchemaField{Type: schema.FieldTypeDate}, "2022-01-01 11:27:10.123", `"2022-01-01 11:27:10.123"`},
+		{schema.SchemaField{Type: schema.FieldTypeDate}, "test", `""`},
+		{schema.SchemaField{Type: schema.FieldTypeDate}, 1641024040, `"2022-01-01 08:00:40.000Z"`},
+		{schema.SchemaField{Type: schema.FieldTypeDate}, "2022-01-01 11:27:10.123", `"2022-01-01 11:27:10.123Z"`},
+		{schema.SchemaField{Type: schema.FieldTypeDate}, "2022-01-01 11:27:10.123Z", `"2022-01-01 11:27:10.123Z"`},
 		{schema.SchemaField{Type: schema.FieldTypeDate}, types.DateTime{}, `""`},
 		{schema.SchemaField{Type: schema.FieldTypeDate}, time.Time{}, `""`},
 
 		// select (single)
-		{schema.SchemaField{Type: schema.FieldTypeSelect}, nil, `null`},
-		{schema.SchemaField{Type: schema.FieldTypeSelect}, "", `null`},
+		{schema.SchemaField{Type: schema.FieldTypeSelect}, nil, `""`},
+		{schema.SchemaField{Type: schema.FieldTypeSelect}, "", `""`},
 		{schema.SchemaField{Type: schema.FieldTypeSelect}, 123, `"123"`},
 		{schema.SchemaField{Type: schema.FieldTypeSelect}, "test", `"test"`},
-		{schema.SchemaField{Type: schema.FieldTypeSelect}, []string{"test1", "test2"}, `"test1"`},
+		{schema.SchemaField{Type: schema.FieldTypeSelect}, []string{"test1", "test2"}, `"test2"`},
 		{
 			// no values validation/filtering
 			schema.SchemaField{
@@ -624,11 +748,11 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 		},
 
 		// file (single)
-		{schema.SchemaField{Type: schema.FieldTypeFile}, nil, `null`},
-		{schema.SchemaField{Type: schema.FieldTypeFile}, "", `null`},
+		{schema.SchemaField{Type: schema.FieldTypeFile}, nil, `""`},
+		{schema.SchemaField{Type: schema.FieldTypeFile}, "", `""`},
 		{schema.SchemaField{Type: schema.FieldTypeFile}, 123, `"123"`},
 		{schema.SchemaField{Type: schema.FieldTypeFile}, "test", `"test"`},
-		{schema.SchemaField{Type: schema.FieldTypeFile}, []string{"test1", "test2"}, `"test1"`},
+		{schema.SchemaField{Type: schema.FieldTypeFile}, []string{"test1", "test2"}, `"test2"`},
 		// file (multiple)
 		{
 			schema.SchemaField{
@@ -690,21 +814,56 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 		},
 
 		// relation (single)
-		{schema.SchemaField{Type: schema.FieldTypeRelation}, nil, `null`},
-		{schema.SchemaField{Type: schema.FieldTypeRelation}, "", `null`},
-		{schema.SchemaField{Type: schema.FieldTypeRelation}, 123, `"123"`},
-		{schema.SchemaField{Type: schema.FieldTypeRelation}, "abc", `"abc"`},
-		{schema.SchemaField{Type: schema.FieldTypeRelation}, "1ba88b4f-e9da-42f0-9764-9a55c953e724", `"1ba88b4f-e9da-42f0-9764-9a55c953e724"`},
 		{
-			schema.SchemaField{Type: schema.FieldTypeRelation},
-			[]string{"1ba88b4f-e9da-42f0-9764-9a55c953e724", "2ba88b4f-e9da-42f0-9764-9a55c953e724"},
+			schema.SchemaField{
+				Type:    schema.FieldTypeRelation,
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)},
+			},
+			nil,
+			`""`,
+		},
+		{
+			schema.SchemaField{
+				Type:    schema.FieldTypeRelation,
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)},
+			},
+			"",
+			`""`,
+		},
+		{
+			schema.SchemaField{
+				Type:    schema.FieldTypeRelation,
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)},
+			},
+			123,
+			`"123"`,
+		},
+		{
+			schema.SchemaField{
+				Type:    schema.FieldTypeRelation,
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)},
+			},
+			"abc",
+			`"abc"`,
+		},
+		{
+			schema.SchemaField{
+				Type:    schema.FieldTypeRelation,
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)},
+			},
+			"1ba88b4f-e9da-42f0-9764-9a55c953e724",
 			`"1ba88b4f-e9da-42f0-9764-9a55c953e724"`,
+		},
+		{
+			schema.SchemaField{Type: schema.FieldTypeRelation, Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			[]string{"1ba88b4f-e9da-42f0-9764-9a55c953e724", "2ba88b4f-e9da-42f0-9764-9a55c953e724"},
+			`"2ba88b4f-e9da-42f0-9764-9a55c953e724"`,
 		},
 		// relation (multiple)
 		{
 			schema.SchemaField{
 				Type:    schema.FieldTypeRelation,
-				Options: &schema.RelationOptions{MaxSelect: 2},
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(2)},
 			},
 			nil,
 			`[]`,
@@ -712,7 +871,7 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 		{
 			schema.SchemaField{
 				Type:    schema.FieldTypeRelation,
-				Options: &schema.RelationOptions{MaxSelect: 2},
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(2)},
 			},
 			"",
 			`[]`,
@@ -720,7 +879,7 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 		{
 			schema.SchemaField{
 				Type:    schema.FieldTypeRelation,
-				Options: &schema.RelationOptions{MaxSelect: 2},
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(2)},
 			},
 			[]string{},
 			`[]`,
@@ -728,7 +887,7 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 		{
 			schema.SchemaField{
 				Type:    schema.FieldTypeRelation,
-				Options: &schema.RelationOptions{MaxSelect: 2},
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(2)},
 			},
 			123,
 			`["123"]`,
@@ -736,7 +895,7 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 		{
 			schema.SchemaField{
 				Type:    schema.FieldTypeRelation,
-				Options: &schema.RelationOptions{MaxSelect: 2},
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(2)},
 			},
 			[]string{"", "abc"},
 			`["abc"]`,
@@ -745,7 +904,7 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 			// no values validation
 			schema.SchemaField{
 				Type:    schema.FieldTypeRelation,
-				Options: &schema.RelationOptions{MaxSelect: 2},
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(2)},
 			},
 			[]string{"1ba88b4f-e9da-42f0-9764-9a55c953e724", "2ba88b4f-e9da-42f0-9764-9a55c953e724"},
 			`["1ba88b4f-e9da-42f0-9764-9a55c953e724","2ba88b4f-e9da-42f0-9764-9a55c953e724"]`,
@@ -754,77 +913,7 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 			// duplicated values
 			schema.SchemaField{
 				Type:    schema.FieldTypeRelation,
-				Options: &schema.RelationOptions{MaxSelect: 2},
-			},
-			[]string{"1ba88b4f-e9da-42f0-9764-9a55c953e724", "2ba88b4f-e9da-42f0-9764-9a55c953e724", "1ba88b4f-e9da-42f0-9764-9a55c953e724"},
-			`["1ba88b4f-e9da-42f0-9764-9a55c953e724","2ba88b4f-e9da-42f0-9764-9a55c953e724"]`,
-		},
-
-		// user (single)
-		{schema.SchemaField{Type: schema.FieldTypeUser}, nil, `null`},
-		{schema.SchemaField{Type: schema.FieldTypeUser}, "", `null`},
-		{schema.SchemaField{Type: schema.FieldTypeUser}, 123, `"123"`},
-		{schema.SchemaField{Type: schema.FieldTypeUser}, "1ba88b4f-e9da-42f0-9764-9a55c953e724", `"1ba88b4f-e9da-42f0-9764-9a55c953e724"`},
-		{
-			schema.SchemaField{Type: schema.FieldTypeUser},
-			[]string{"1ba88b4f-e9da-42f0-9764-9a55c953e724", "2ba88b4f-e9da-42f0-9764-9a55c953e724"},
-			`"1ba88b4f-e9da-42f0-9764-9a55c953e724"`,
-		},
-		// user (multiple)
-		{
-			schema.SchemaField{
-				Type:    schema.FieldTypeUser,
-				Options: &schema.UserOptions{MaxSelect: 2},
-			},
-			nil,
-			`[]`,
-		},
-		{
-			schema.SchemaField{
-				Type:    schema.FieldTypeUser,
-				Options: &schema.UserOptions{MaxSelect: 2},
-			},
-			"",
-			`[]`,
-		},
-		{
-			schema.SchemaField{
-				Type:    schema.FieldTypeUser,
-				Options: &schema.UserOptions{MaxSelect: 2},
-			},
-			[]string{},
-			`[]`,
-		},
-		{
-			schema.SchemaField{
-				Type:    schema.FieldTypeUser,
-				Options: &schema.UserOptions{MaxSelect: 2},
-			},
-			123,
-			`["123"]`,
-		},
-		{
-			schema.SchemaField{
-				Type:    schema.FieldTypeUser,
-				Options: &schema.UserOptions{MaxSelect: 2},
-			},
-			[]string{"", "abc"},
-			`["abc"]`,
-		},
-		{
-			// no values validation
-			schema.SchemaField{
-				Type:    schema.FieldTypeUser,
-				Options: &schema.UserOptions{MaxSelect: 2},
-			},
-			[]string{"1ba88b4f-e9da-42f0-9764-9a55c953e724", "2ba88b4f-e9da-42f0-9764-9a55c953e724"},
-			`["1ba88b4f-e9da-42f0-9764-9a55c953e724","2ba88b4f-e9da-42f0-9764-9a55c953e724"]`,
-		},
-		{
-			// duplicated values
-			schema.SchemaField{
-				Type:    schema.FieldTypeUser,
-				Options: &schema.UserOptions{MaxSelect: 2},
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(2)},
 			},
 			[]string{"1ba88b4f-e9da-42f0-9764-9a55c953e724", "2ba88b4f-e9da-42f0-9764-9a55c953e724", "1ba88b4f-e9da-42f0-9764-9a55c953e724"},
 			`["1ba88b4f-e9da-42f0-9764-9a55c953e724","2ba88b4f-e9da-42f0-9764-9a55c953e724"]`,
@@ -842,6 +931,730 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
 
 		if string(encoded) != s.expectJson {
 			t.Errorf("(%d), Expected %v, got %v", i, s.expectJson, string(encoded))
+		}
+	}
+}
+
+func TestSchemaFieldPrepareValueWithModifier(t *testing.T) {
+	scenarios := []struct {
+		name          string
+		field         schema.SchemaField
+		baseValue     any
+		modifier      string
+		modifierValue any
+		expectJson    string
+	}{
+		// text
+		{
+			"text with '+' modifier",
+			schema.SchemaField{Type: schema.FieldTypeText},
+			"base",
+			"+",
+			"new",
+			`"base"`,
+		},
+		{
+			"text with '-' modifier",
+			schema.SchemaField{Type: schema.FieldTypeText},
+			"base",
+			"-",
+			"new",
+			`"base"`,
+		},
+		{
+			"text with unknown modifier",
+			schema.SchemaField{Type: schema.FieldTypeText},
+			"base",
+			"?",
+			"new",
+			`"base"`,
+		},
+		{
+			"text cast check",
+			schema.SchemaField{Type: schema.FieldTypeText},
+			123,
+			"?",
+			"new",
+			`"123"`,
+		},
+
+		// number
+		{
+			"number with '+' modifier",
+			schema.SchemaField{Type: schema.FieldTypeNumber},
+			1,
+			"+",
+			4,
+			`5`,
+		},
+		{
+			"number with '-' modifier",
+			schema.SchemaField{Type: schema.FieldTypeNumber},
+			1,
+			"-",
+			4,
+			`-3`,
+		},
+		{
+			"number with unknown modifier",
+			schema.SchemaField{Type: schema.FieldTypeNumber},
+			"1",
+			"?",
+			4,
+			`1`,
+		},
+		{
+			"number cast check",
+			schema.SchemaField{Type: schema.FieldTypeNumber},
+			"test",
+			"+",
+			"4",
+			`4`,
+		},
+
+		// bool
+		{
+			"bool with '+' modifier",
+			schema.SchemaField{Type: schema.FieldTypeBool},
+			true,
+			"+",
+			false,
+			`true`,
+		},
+		{
+			"bool with '-' modifier",
+			schema.SchemaField{Type: schema.FieldTypeBool},
+			true,
+			"-",
+			false,
+			`true`,
+		},
+		{
+			"bool with unknown modifier",
+			schema.SchemaField{Type: schema.FieldTypeBool},
+			true,
+			"?",
+			false,
+			`true`,
+		},
+		{
+			"bool cast check",
+			schema.SchemaField{Type: schema.FieldTypeBool},
+			"true",
+			"?",
+			false,
+			`true`,
+		},
+
+		// email
+		{
+			"email with '+' modifier",
+			schema.SchemaField{Type: schema.FieldTypeEmail},
+			"base",
+			"+",
+			"new",
+			`"base"`,
+		},
+		{
+			"email with '-' modifier",
+			schema.SchemaField{Type: schema.FieldTypeEmail},
+			"base",
+			"-",
+			"new",
+			`"base"`,
+		},
+		{
+			"email with unknown modifier",
+			schema.SchemaField{Type: schema.FieldTypeEmail},
+			"base",
+			"?",
+			"new",
+			`"base"`,
+		},
+		{
+			"email cast check",
+			schema.SchemaField{Type: schema.FieldTypeEmail},
+			123,
+			"?",
+			"new",
+			`"123"`,
+		},
+
+		// url
+		{
+			"url with '+' modifier",
+			schema.SchemaField{Type: schema.FieldTypeUrl},
+			"base",
+			"+",
+			"new",
+			`"base"`,
+		},
+		{
+			"url with '-' modifier",
+			schema.SchemaField{Type: schema.FieldTypeUrl},
+			"base",
+			"-",
+			"new",
+			`"base"`,
+		},
+		{
+			"url with unknown modifier",
+			schema.SchemaField{Type: schema.FieldTypeUrl},
+			"base",
+			"?",
+			"new",
+			`"base"`,
+		},
+		{
+			"url cast check",
+			schema.SchemaField{Type: schema.FieldTypeUrl},
+			123,
+			"-",
+			"new",
+			`"123"`,
+		},
+
+		// editor
+		{
+			"editor with '+' modifier",
+			schema.SchemaField{Type: schema.FieldTypeEditor},
+			"base",
+			"+",
+			"new",
+			`"base"`,
+		},
+		{
+			"editor with '-' modifier",
+			schema.SchemaField{Type: schema.FieldTypeEditor},
+			"base",
+			"-",
+			"new",
+			`"base"`,
+		},
+		{
+			"editor with unknown modifier",
+			schema.SchemaField{Type: schema.FieldTypeEditor},
+			"base",
+			"?",
+			"new",
+			`"base"`,
+		},
+		{
+			"editor cast check",
+			schema.SchemaField{Type: schema.FieldTypeEditor},
+			123,
+			"-",
+			"new",
+			`"123"`,
+		},
+
+		// date
+		{
+			"date with '+' modifier",
+			schema.SchemaField{Type: schema.FieldTypeDate},
+			"2023-01-01 00:00:00.123",
+			"+",
+			"2023-02-01 00:00:00.456",
+			`"2023-01-01 00:00:00.123Z"`,
+		},
+		{
+			"date with '-' modifier",
+			schema.SchemaField{Type: schema.FieldTypeDate},
+			"2023-01-01 00:00:00.123Z",
+			"-",
+			"2023-02-01 00:00:00.456Z",
+			`"2023-01-01 00:00:00.123Z"`,
+		},
+		{
+			"date with unknown modifier",
+			schema.SchemaField{Type: schema.FieldTypeDate},
+			"2023-01-01 00:00:00.123",
+			"?",
+			"2023-01-01 00:00:00.456",
+			`"2023-01-01 00:00:00.123Z"`,
+		},
+		{
+			"date cast check",
+			schema.SchemaField{Type: schema.FieldTypeDate},
+			1672524000, // 2022-12-31 22:00:00.000Z
+			"+",
+			100,
+			`"2022-12-31 22:00:00.000Z"`,
+		},
+
+		// json
+		{
+			"json with '+' modifier",
+			schema.SchemaField{Type: schema.FieldTypeJson},
+			10,
+			"+",
+			5,
+			`10`,
+		},
+		{
+			"json with '+' modifier (slice)",
+			schema.SchemaField{Type: schema.FieldTypeJson},
+			[]string{"a", "b"},
+			"+",
+			"c",
+			`["a","b"]`,
+		},
+		{
+			"json with '-' modifier",
+			schema.SchemaField{Type: schema.FieldTypeJson},
+			10,
+			"-",
+			5,
+			`10`,
+		},
+		{
+			"json with '-' modifier (slice)",
+			schema.SchemaField{Type: schema.FieldTypeJson},
+			`["a","b"]`,
+			"-",
+			"c",
+			`["a","b"]`,
+		},
+		{
+			"json with unknown modifier",
+			schema.SchemaField{Type: schema.FieldTypeJson},
+			`"base"`,
+			"?",
+			`"new"`,
+			`"base"`,
+		},
+
+		// single select
+		{
+			"single select with '+' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 1}},
+			"",
+			"+",
+			"b",
+			`"b"`,
+		},
+		{
+			"single select with '+' modifier (nonempty base)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 1}},
+			"a",
+			"+",
+			"b",
+			`"b"`,
+		},
+		{
+			"single select with '-' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 1}},
+			"",
+			"-",
+			"a",
+			`""`,
+		},
+		{
+			"single select with '-' modifier (nonempty base and empty modifier value)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 1}},
+			"a",
+			"-",
+			"",
+			`"a"`,
+		},
+		{
+			"single select with '-' modifier (nonempty base and different value)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 1}},
+			"a",
+			"-",
+			"b",
+			`"a"`,
+		},
+		{
+			"single select with '-' modifier (nonempty base and matching value)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 1}},
+			"a",
+			"-",
+			"a",
+			`""`,
+		},
+		{
+			"single select with '-' modifier (nonempty base and matching value in a slice)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 1}},
+			"a",
+			"-",
+			[]string{"b", "a", "c", "123"},
+			`""`,
+		},
+		{
+			"single select with unknown modifier (nonempty)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 1}},
+			"",
+			"?",
+			"a",
+			`""`,
+		},
+
+		// multi select
+		{
+			"multi select with '+' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 10}},
+			nil,
+			"+",
+			"b",
+			`["b"]`,
+		},
+		{
+			"multi select with '+' modifier (nonempty base)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 10}},
+			[]string{"a"},
+			"+",
+			[]string{"b", "c"},
+			`["a","b","c"]`,
+		},
+		{
+			"multi select with '+' modifier (nonempty base; already existing value)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 10}},
+			[]string{"a", "b"},
+			"+",
+			"b",
+			`["a","b"]`,
+		},
+		{
+			"multi select with '-' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 10}},
+			nil,
+			"-",
+			[]string{"a"},
+			`[]`,
+		},
+		{
+			"multi select with '-' modifier (nonempty base and empty modifier value)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 10}},
+			"a",
+			"-",
+			"",
+			`["a"]`,
+		},
+		{
+			"multi select with '-' modifier (nonempty base and different value)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 10}},
+			"a",
+			"-",
+			"b",
+			`["a"]`,
+		},
+		{
+			"multi select with '-' modifier (nonempty base and matching value)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 10}},
+			[]string{"a", "b", "c", "d"},
+			"-",
+			"c",
+			`["a","b","d"]`,
+		},
+		{
+			"multi select with '-' modifier (nonempty base and matching value in a slice)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 10}},
+			[]string{"a", "b", "c", "d"},
+			"-",
+			[]string{"b", "a", "123"},
+			`["c","d"]`,
+		},
+		{
+			"multi select with unknown modifier (nonempty)",
+			schema.SchemaField{Type: schema.FieldTypeSelect, Options: &schema.SelectOptions{MaxSelect: 10}},
+			[]string{"a", "b"},
+			"?",
+			"a",
+			`["a","b"]`,
+		},
+
+		// single relation
+		{
+			"single relation with '+' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeRelation, Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			"",
+			"+",
+			"b",
+			`"b"`,
+		},
+		{
+			"single relation with '+' modifier (nonempty base)",
+			schema.SchemaField{Type: schema.FieldTypeRelation, Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			"a",
+			"+",
+			"b",
+			`"b"`,
+		},
+		{
+			"single relation with '-' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeRelation, Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			"",
+			"-",
+			"a",
+			`""`,
+		},
+		{
+			"single relation with '-' modifier (nonempty base and empty modifier value)",
+			schema.SchemaField{Type: schema.FieldTypeRelation, Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			"a",
+			"-",
+			"",
+			`"a"`,
+		},
+		{
+			"single relation with '-' modifier (nonempty base and different value)",
+			schema.SchemaField{Type: schema.FieldTypeRelation, Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			"a",
+			"-",
+			"b",
+			`"a"`,
+		},
+		{
+			"single relation with '-' modifier (nonempty base and matching value)",
+			schema.SchemaField{Type: schema.FieldTypeRelation, Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			"a",
+			"-",
+			"a",
+			`""`,
+		},
+		{
+			"single relation with '-' modifier (nonempty base and matching value in a slice)",
+			schema.SchemaField{Type: schema.FieldTypeRelation, Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			"a",
+			"-",
+			[]string{"b", "a", "c", "123"},
+			`""`,
+		},
+		{
+			"single relation with unknown modifier (nonempty)",
+			schema.SchemaField{Type: schema.FieldTypeRelation, Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)}},
+			"",
+			"?",
+			"a",
+			`""`,
+		},
+
+		// multi relation
+		{
+			"multi relation with '+' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeRelation},
+			nil,
+			"+",
+			"b",
+			`["b"]`,
+		},
+		{
+			"multi relation with '+' modifier (nonempty base)",
+			schema.SchemaField{Type: schema.FieldTypeRelation},
+			[]string{"a"},
+			"+",
+			[]string{"b", "c"},
+			`["a","b","c"]`,
+		},
+		{
+			"multi relation with '+' modifier (nonempty base; already existing value)",
+			schema.SchemaField{Type: schema.FieldTypeRelation},
+			[]string{"a", "b"},
+			"+",
+			"b",
+			`["a","b"]`,
+		},
+		{
+			"multi relation with '-' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeRelation},
+			nil,
+			"-",
+			[]string{"a"},
+			`[]`,
+		},
+		{
+			"multi relation with '-' modifier (nonempty base and empty modifier value)",
+			schema.SchemaField{Type: schema.FieldTypeRelation},
+			"a",
+			"-",
+			"",
+			`["a"]`,
+		},
+		{
+			"multi relation with '-' modifier (nonempty base and different value)",
+			schema.SchemaField{Type: schema.FieldTypeRelation},
+			"a",
+			"-",
+			"b",
+			`["a"]`,
+		},
+		{
+			"multi relation with '-' modifier (nonempty base and matching value)",
+			schema.SchemaField{Type: schema.FieldTypeRelation},
+			[]string{"a", "b", "c", "d"},
+			"-",
+			"c",
+			`["a","b","d"]`,
+		},
+		{
+			"multi relation with '-' modifier (nonempty base and matching value in a slice)",
+			schema.SchemaField{Type: schema.FieldTypeRelation},
+			[]string{"a", "b", "c", "d"},
+			"-",
+			[]string{"b", "a", "123"},
+			`["c","d"]`,
+		},
+		{
+			"multi relation with unknown modifier (nonempty)",
+			schema.SchemaField{Type: schema.FieldTypeRelation},
+			[]string{"a", "b"},
+			"?",
+			"a",
+			`["a","b"]`,
+		},
+
+		// single file
+		{
+			"single file with '+' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 1}},
+			"",
+			"+",
+			"b",
+			`""`,
+		},
+		{
+			"single file with '+' modifier (nonempty base)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 1}},
+			"a",
+			"+",
+			"b",
+			`"a"`,
+		},
+		{
+			"single file with '-' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 1}},
+			"",
+			"-",
+			"a",
+			`""`,
+		},
+		{
+			"single file with '-' modifier (nonempty base and empty modifier value)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 1}},
+			"a",
+			"-",
+			"",
+			`"a"`,
+		},
+		{
+			"single file with '-' modifier (nonempty base and different value)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 1}},
+			"a",
+			"-",
+			"b",
+			`"a"`,
+		},
+		{
+			"single file with '-' modifier (nonempty base and matching value)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 1}},
+			"a",
+			"-",
+			"a",
+			`""`,
+		},
+		{
+			"single file with '-' modifier (nonempty base and matching value in a slice)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 1}},
+			"a",
+			"-",
+			[]string{"b", "a", "c", "123"},
+			`""`,
+		},
+		{
+			"single file with unknown modifier (nonempty)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 1}},
+			"",
+			"?",
+			"a",
+			`""`,
+		},
+
+		// multi file
+		{
+			"multi file with '+' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 10}},
+			nil,
+			"+",
+			"b",
+			`[]`,
+		},
+		{
+			"multi file with '+' modifier (nonempty base)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 10}},
+			[]string{"a"},
+			"+",
+			[]string{"b", "c"},
+			`["a"]`,
+		},
+		{
+			"multi file with '+' modifier (nonempty base; already existing value)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 10}},
+			[]string{"a", "b"},
+			"+",
+			"b",
+			`["a","b"]`,
+		},
+		{
+			"multi file with '-' modifier (empty base)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 10}},
+			nil,
+			"-",
+			[]string{"a"},
+			`[]`,
+		},
+		{
+			"multi file with '-' modifier (nonempty base and empty modifier value)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 10}},
+			"a",
+			"-",
+			"",
+			`["a"]`,
+		},
+		{
+			"multi file with '-' modifier (nonempty base and different value)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 10}},
+			"a",
+			"-",
+			"b",
+			`["a"]`,
+		},
+		{
+			"multi file with '-' modifier (nonempty base and matching value)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 10}},
+			[]string{"a", "b", "c", "d"},
+			"-",
+			"c",
+			`["a","b","d"]`,
+		},
+		{
+			"multi file with '-' modifier (nonempty base and matching value in a slice)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 10}},
+			[]string{"a", "b", "c", "d"},
+			"-",
+			[]string{"b", "a", "123"},
+			`["c","d"]`,
+		},
+		{
+			"multi file with unknown modifier (nonempty)",
+			schema.SchemaField{Type: schema.FieldTypeFile, Options: &schema.FileOptions{MaxSelect: 10}},
+			[]string{"a", "b"},
+			"?",
+			"a",
+			`["a","b"]`,
+		},
+	}
+
+	for _, s := range scenarios {
+		result := s.field.PrepareValueWithModifier(s.baseValue, s.modifier, s.modifierValue)
+
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			t.Fatalf("[%s] %v", s.name, err)
+		}
+
+		if string(encoded) != s.expectJson {
+			t.Fatalf("[%s], Expected %v, got %v", s.name, s.expectJson, string(encoded))
 		}
 	}
 }
@@ -946,8 +1759,12 @@ func TestTextOptionsValidate(t *testing.T) {
 }
 
 func TestNumberOptionsValidate(t *testing.T) {
-	number1 := 10.0
-	number2 := 20.0
+	int1 := 10.0
+	int2 := 20.0
+
+	decimal1 := 10.5
+	decimal2 := 20.5
+
 	scenarios := []fieldOptionsScenario{
 		{
 			"empty",
@@ -957,23 +1774,41 @@ func TestNumberOptionsValidate(t *testing.T) {
 		{
 			"max - without min",
 			schema.NumberOptions{
-				Max: &number1,
+				Max: &int1,
 			},
 			[]string{},
 		},
 		{
 			"max - failure with min",
 			schema.NumberOptions{
-				Min: &number2,
-				Max: &number1,
+				Min: &int2,
+				Max: &int1,
 			},
 			[]string{"max"},
 		},
 		{
 			"max - success with min",
 			schema.NumberOptions{
-				Min: &number1,
-				Max: &number2,
+				Min: &int1,
+				Max: &int2,
+			},
+			[]string{},
+		},
+		{
+			"NoDecimal range failure",
+			schema.NumberOptions{
+				Min:       &decimal1,
+				Max:       &decimal2,
+				NoDecimal: true,
+			},
+			[]string{"min", "max"},
+		},
+		{
+			"NoDecimal range success",
+			schema.NumberOptions{
+				Min:       &int1,
+				Max:       &int2,
+				NoDecimal: true,
 			},
 			[]string{},
 		},
@@ -1090,6 +1925,18 @@ func TestUrlOptionsValidate(t *testing.T) {
 	checkFieldOptionsScenarios(t, scenarios)
 }
 
+func TestEditorOptionsValidate(t *testing.T) {
+	scenarios := []fieldOptionsScenario{
+		{
+			"empty",
+			schema.EditorOptions{},
+			[]string{},
+		},
+	}
+
+	checkFieldOptionsScenarios(t, scenarios)
+}
+
 func TestDateOptionsValidate(t *testing.T) {
 	date1 := types.NowDateTime()
 	date2, _ := types.ParseDateTime(date1.Time().AddDate(1, 0, 0))
@@ -1195,11 +2042,43 @@ func TestSelectOptionsValidate(t *testing.T) {
 	checkFieldOptionsScenarios(t, scenarios)
 }
 
+func TestSelectOptionsIsMultiple(t *testing.T) {
+	scenarios := []struct {
+		maxSelect int
+		expect    bool
+	}{
+		{-1, false},
+		{0, false},
+		{1, false},
+		{2, true},
+	}
+
+	for i, s := range scenarios {
+		opt := schema.SelectOptions{
+			MaxSelect: s.maxSelect,
+		}
+
+		if v := opt.IsMultiple(); v != s.expect {
+			t.Errorf("[%d] Expected %v, got %v", i, s.expect, v)
+		}
+	}
+}
+
 func TestJsonOptionsValidate(t *testing.T) {
 	scenarios := []fieldOptionsScenario{
 		{
 			"empty",
 			schema.JsonOptions{},
+			[]string{"maxSize"},
+		},
+		{
+			"MaxSize < 0",
+			schema.JsonOptions{MaxSize: -1},
+			[]string{"maxSize"},
+		},
+		{
+			"MaxSize > 0",
+			schema.JsonOptions{MaxSize: 1},
 			[]string{},
 		},
 	}
@@ -1240,29 +2119,11 @@ func TestFileOptionsValidate(t *testing.T) {
 			[]string{"thumbs"},
 		},
 		{
-			"invalid thumbs format - zero width",
+			"invalid thumbs format - zero width and height",
 			schema.FileOptions{
 				MaxSize:   1,
 				MaxSelect: 2,
-				Thumbs:    []string{"0x100"},
-			},
-			[]string{"thumbs"},
-		},
-		{
-			"invalid thumbs format - zero height",
-			schema.FileOptions{
-				MaxSize:   1,
-				MaxSelect: 2,
-				Thumbs:    []string{"100x0"},
-			},
-			[]string{"thumbs"},
-		},
-		{
-			"invalid thumbs format - zero with and height",
-			schema.FileOptions{
-				MaxSize:   1,
-				MaxSelect: 2,
-				Thumbs:    []string{"0x0"},
+				Thumbs:    []string{"0x0", "0x0t", "0x0b", "0x0f"},
 			},
 			[]string{"thumbs"},
 		},
@@ -1271,13 +2132,38 @@ func TestFileOptionsValidate(t *testing.T) {
 			schema.FileOptions{
 				MaxSize:   1,
 				MaxSelect: 2,
-				Thumbs:    []string{"100x100", "200x100", "1x1"},
+				Thumbs: []string{
+					"100x100", "200x100", "0x100", "100x0",
+					"10x10t", "10x10b", "10x10f",
+				},
 			},
 			[]string{},
 		},
 	}
 
 	checkFieldOptionsScenarios(t, scenarios)
+}
+
+func TestFileOptionsIsMultiple(t *testing.T) {
+	scenarios := []struct {
+		maxSelect int
+		expect    bool
+	}{
+		{-1, false},
+		{0, false},
+		{1, false},
+		{2, true},
+	}
+
+	for i, s := range scenarios {
+		opt := schema.FileOptions{
+			MaxSelect: s.maxSelect,
+		}
+
+		if v := opt.IsMultiple(); v != s.expect {
+			t.Errorf("[%d] Expected %v, got %v", i, s.expect, v)
+		}
+	}
 }
 
 func TestRelationOptionsValidate(t *testing.T) {
@@ -1285,59 +2171,108 @@ func TestRelationOptionsValidate(t *testing.T) {
 		{
 			"empty",
 			schema.RelationOptions{},
-			[]string{"maxSelect", "collectionId"},
+			[]string{"collectionId"},
 		},
 		{
 			"empty CollectionId",
 			schema.RelationOptions{
 				CollectionId: "",
-				MaxSelect:    1,
+				MaxSelect:    types.Pointer(1),
 			},
 			[]string{"collectionId"},
+		},
+		{
+			"MinSelect < 0",
+			schema.RelationOptions{
+				CollectionId: "abc",
+				MinSelect:    types.Pointer(-1),
+			},
+			[]string{"minSelect"},
+		},
+		{
+			"MinSelect >= 0",
+			schema.RelationOptions{
+				CollectionId: "abc",
+				MinSelect:    types.Pointer(0),
+			},
+			[]string{},
 		},
 		{
 			"MaxSelect <= 0",
 			schema.RelationOptions{
 				CollectionId: "abc",
-				MaxSelect:    0,
+				MaxSelect:    types.Pointer(0),
 			},
 			[]string{"maxSelect"},
 		},
 		{
-			"MaxSelect > 0 && non-empty CollectionId",
+			"MaxSelect > 0 && nonempty CollectionId",
 			schema.RelationOptions{
 				CollectionId: "abc",
-				MaxSelect:    1,
+				MaxSelect:    types.Pointer(1),
 			},
 			[]string{},
+		},
+		{
+			"MinSelect < MaxSelect",
+			schema.RelationOptions{
+				CollectionId: "abc",
+				MinSelect:    nil,
+				MaxSelect:    types.Pointer(1),
+			},
+			[]string{},
+		},
+		{
+			"MinSelect = MaxSelect (non-zero)",
+			schema.RelationOptions{
+				CollectionId: "abc",
+				MinSelect:    types.Pointer(1),
+				MaxSelect:    types.Pointer(1),
+			},
+			[]string{},
+		},
+		{
+			"MinSelect = MaxSelect (both zero)",
+			schema.RelationOptions{
+				CollectionId: "abc",
+				MinSelect:    types.Pointer(0),
+				MaxSelect:    types.Pointer(0),
+			},
+			[]string{"maxSelect"},
+		},
+		{
+			"MinSelect > MaxSelect",
+			schema.RelationOptions{
+				CollectionId: "abc",
+				MinSelect:    types.Pointer(2),
+				MaxSelect:    types.Pointer(1),
+			},
+			[]string{"maxSelect"},
 		},
 	}
 
 	checkFieldOptionsScenarios(t, scenarios)
 }
 
-func TestUserOptionsValidate(t *testing.T) {
-	scenarios := []fieldOptionsScenario{
-		{
-			"empty",
-			schema.UserOptions{},
-			[]string{"maxSelect"},
-		},
-		{
-			"MaxSelect <= 0",
-			schema.UserOptions{
-				MaxSelect: 0,
-			},
-			[]string{"maxSelect"},
-		},
-		{
-			"MaxSelect > 0",
-			schema.UserOptions{
-				MaxSelect: 1,
-			},
-			[]string{},
-		},
+func TestRelationOptionsIsMultiple(t *testing.T) {
+	scenarios := []struct {
+		maxSelect *int
+		expect    bool
+	}{
+		{nil, true},
+		{types.Pointer(-1), false},
+		{types.Pointer(0), false},
+		{types.Pointer(1), false},
+		{types.Pointer(2), true},
 	}
 
-	checkFieldOptionsScenarios(t, scenarios)
+	for i, s := range scenarios {
+		opt := schema.RelationOptions{
+			MaxSelect: s.maxSelect,
+		}
+
+		if v := opt.IsMultiple(); v != s.expect {
+			t.Errorf("[%d] Expected %v, got %v", i, s.expect, v)
+		}
+	}
 }

@@ -1,21 +1,19 @@
 <script>
     import ApiClient from "@/utils/ApiClient";
-    import CommonHelper from "@/utils/CommonHelper";
-    import { setErrors } from "@/stores/errors";
-    import { addSuccessToast } from "@/stores/toasts";
+    import { pageTitle } from "@/stores/app";
+    import PageWrapper from "@/components/base/PageWrapper.svelte";
     import SettingsSidebar from "@/components/settings/SettingsSidebar.svelte";
-    import EmailAuthAccordion from "@/components/settings/EmailAuthAccordion.svelte";
-    import AuthProviderAccordion from "@/components/settings/AuthProviderAccordion.svelte";
+    import AuthProviderCard from "@/components/settings/AuthProviderCard.svelte";
+    import providersList from "@/providers.js";
 
-    let emailAuthAccordion;
-    let authSettings = {};
+    $pageTitle = "Auth providers";
+
     let isLoading = false;
-    let isSaving = false;
-    let initialHash = "";
+    let formSettings = {};
 
-    $: hasChanges = initialHash != JSON.stringify(authSettings);
+    $: enabledProviders = providersList.filter((provider) => formSettings[provider.key]?.enabled);
 
-    CommonHelper.setDocumentTitle("Auth providers");
+    $: disabledProviders = providersList.filter((provider) => !formSettings[provider.key]?.enabled);
 
     loadSettings();
 
@@ -23,120 +21,62 @@
         isLoading = true;
 
         try {
-            const result = (await ApiClient.Settings.getAll()) || {};
+            const result = (await ApiClient.settings.getAll()) || {};
             initSettings(result);
         } catch (err) {
-            ApiClient.errorResponseHandler(err);
+            ApiClient.error(err);
         }
 
         isLoading = false;
     }
 
-    async function save() {
-        if (isSaving || !hasChanges) {
-            return;
-        }
-
-        isSaving = true;
-
-        try {
-            const result = await ApiClient.Settings.update(CommonHelper.filterRedactedProps(authSettings));
-            initSettings(result);
-            setErrors({});
-            emailAuthAccordion?.collapseSiblings();
-            addSuccessToast("Successfully updated auth providers.");
-        } catch (err) {
-            ApiClient.errorResponseHandler(err);
-        }
-
-        isSaving = false;
-    }
-
     function initSettings(data) {
         data = data || {};
+        formSettings = {};
 
-        authSettings = {};
-        authSettings.emailAuth = Object.assign({ enabled: true }, data.emailAuth);
-
-        const providers = ["googleAuth", "facebookAuth", "githubAuth", "gitlabAuth"];
-        for (const provider of providers) {
-            authSettings[provider] = Object.assign(
-                { enabled: false, allowRegistrations: true },
-                data[provider]
-            );
+        for (const provider of providersList) {
+            formSettings[provider.key] = Object.assign({ enabled: false }, data[provider.key]);
         }
-
-        initialHash = JSON.stringify(authSettings);
     }
 </script>
 
 <SettingsSidebar />
 
-<main class="page-wrapper">
+<PageWrapper>
     <header class="page-header">
         <nav class="breadcrumbs">
             <div class="breadcrumb-item">Settings</div>
-            <div class="breadcrumb-item">Auth providers</div>
+            <div class="breadcrumb-item">{$pageTitle}</div>
         </nav>
     </header>
 
     <div class="wrapper">
-        <form class="panel" autocomplete="off" on:submit|preventDefault={save}>
-            <h6 class="m-b-base">Manage the allowed users sign-in/sign-up methods.</h6>
+        <div class="panel">
+            <h6 class="m-b-base">Manage the allowed users OAuth2 sign-in/sign-up methods.</h6>
 
             {#if isLoading}
                 <div class="loader" />
             {:else}
-                <div class="accordions">
-                    <EmailAuthAccordion
-                        bind:this={emailAuthAccordion}
-                        single
-                        bind:config={authSettings.emailAuth}
-                    />
-                    <AuthProviderAccordion
-                        single
-                        key="googleAuth"
-                        title="Google"
-                        icon="ri-google-line"
-                        bind:config={authSettings.googleAuth}
-                    />
-                    <AuthProviderAccordion
-                        single
-                        key="facebookAuth"
-                        title="Facebook"
-                        icon="ri-facebook-line"
-                        bind:config={authSettings.facebookAuth}
-                    />
-                    <AuthProviderAccordion
-                        single
-                        key="githubAuth"
-                        title="GitHub"
-                        icon="ri-github-line"
-                        bind:config={authSettings.githubAuth}
-                    />
-                    <AuthProviderAccordion
-                        single
-                        key="gitlabAuth"
-                        title="GitLab"
-                        icon="ri-gitlab-line"
-                        showSelfHostedFields
-                        bind:config={authSettings.gitlabAuth}
-                    />
+                <div class="grid grid-sm">
+                    {#each enabledProviders as provider (provider.key)}
+                        <div class="col-lg-6">
+                            <AuthProviderCard {provider} bind:config={formSettings[provider.key]} />
+                        </div>
+                    {/each}
                 </div>
 
-                <div class="flex m-t-base">
-                    <div class="flex-fill" />
-                    <button
-                        type="submit"
-                        class="btn btn-expanded"
-                        class:btn-loading={isSaving}
-                        disabled={!hasChanges || isSaving}
-                        on:click={() => save()}
-                    >
-                        <span class="txt">Save changes</span>
-                    </button>
+                {#if enabledProviders.length > 0 && disabledProviders.length > 0}
+                    <hr />
+                {/if}
+
+                <div class="grid grid-sm">
+                    {#each disabledProviders as provider (provider.key)}
+                        <div class="col-lg-6">
+                            <AuthProviderCard {provider} bind:config={formSettings[provider.key]} />
+                        </div>
+                    {/each}
                 </div>
             {/if}
-        </form>
+        </div>
     </div>
-</main>
+</PageWrapper>

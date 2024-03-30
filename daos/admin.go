@@ -5,6 +5,7 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/models"
+	"github.com/pocketbase/pocketbase/tools/list"
 	"github.com/pocketbase/pocketbase/tools/security"
 )
 
@@ -45,10 +46,11 @@ func (dao *Dao) FindAdminByEmail(email string) (*models.Admin, error) {
 	return model, nil
 }
 
-// FindAdminByToken finds the admin associated with the provided JWT token.
+// FindAdminByToken finds the admin associated with the provided JWT.
 //
-// Returns an error if the JWT token is invalid or expired.
+// Returns an error if the JWT is invalid or expired.
 func (dao *Dao) FindAdminByToken(token string, baseTokenKey string) (*models.Admin, error) {
+	// @todo consider caching the unverified claims
 	unverifiedClaims, err := security.ParseUnverifiedJWT(token)
 	if err != nil {
 		return nil, err
@@ -57,7 +59,7 @@ func (dao *Dao) FindAdminByToken(token string, baseTokenKey string) (*models.Adm
 	// check required claims
 	id, _ := unverifiedClaims["id"].(string)
 	if id == "" {
-		return nil, errors.New("Missing or invalid token claims.")
+		return nil, errors.New("missing or invalid token claims")
 	}
 
 	admin, err := dao.FindAdminById(id)
@@ -86,20 +88,22 @@ func (dao *Dao) TotalAdmins() (int, error) {
 
 // IsAdminEmailUnique checks if the provided email address is not
 // already in use by other admins.
-func (dao *Dao) IsAdminEmailUnique(email string, excludeId string) bool {
+func (dao *Dao) IsAdminEmailUnique(email string, excludeIds ...string) bool {
 	if email == "" {
 		return false
 	}
 
-	var exists bool
-	err := dao.AdminQuery().
-		Select("count(*)").
-		AndWhere(dbx.Not(dbx.HashExp{"id": excludeId})).
+	query := dao.AdminQuery().Select("count(*)").
 		AndWhere(dbx.HashExp{"email": email}).
-		Limit(1).
-		Row(&exists)
+		Limit(1)
 
-	return err == nil && !exists
+	if uniqueExcludeIds := list.NonzeroUniques(excludeIds); len(uniqueExcludeIds) > 0 {
+		query.AndWhere(dbx.NotIn("id", list.ToInterfaceSlice(uniqueExcludeIds)...))
+	}
+
+	var exists bool
+
+	return query.Row(&exists) == nil && !exists
 }
 
 // DeleteAdmin deletes the provided Admin model.
@@ -112,7 +116,7 @@ func (dao *Dao) DeleteAdmin(admin *models.Admin) error {
 	}
 
 	if total == 1 {
-		return errors.New("You cannot delete the only existing admin.")
+		return errors.New("you cannot delete the only existing admin")
 	}
 
 	return dao.Delete(admin)

@@ -1,5 +1,7 @@
 <script>
     /**
+     * @todo consider combining with the CodeEditor component.
+     *
      * This component uses Codemirror editor under the hood and its a "little heavy".
      * To allow manuall chunking it is recommended to load the component lazily!
      *
@@ -30,9 +32,9 @@
      * ```
      */
     import { onMount, createEventDispatcher } from "svelte";
-    import CommonHelper from "@/utils/CommonHelper";
     import { collections } from "@/stores/collections";
-    import { Collection } from "pocketbase";
+    import CommonHelper from "@/utils/CommonHelper";
+    import AutocompleteWorker from "@/autocomplete.worker.js?worker";
     // code mirror imports
     // ---
     import {
@@ -51,8 +53,9 @@
         syntaxHighlighting,
         bracketMatching,
         StreamLanguage,
+        syntaxTree,
     } from "@codemirror/language";
-    import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+    import { defaultKeymap, indentWithTab, history, historyKeymap } from "@codemirror/commands";
     import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
     import {
         autocompletion,
@@ -65,23 +68,46 @@
 
     const dispatch = createEventDispatcher();
 
+    export let id = "";
     export let value = "";
     export let disabled = false;
     export let placeholder = "";
-    export let baseCollection = new Collection();
+    export let baseCollection = null;
     export let singleLine = false;
     export let extraAutocompleteKeys = []; // eg. ["test1", "test2"]
     export let disableRequestKeys = false;
-    export let disableIndirectCollectionsKeys = false;
+    export let disableCollectionJoinKeys = false;
 
     let editor;
     let container;
+    let oldDisabledState = disabled;
     let langCompartment = new Compartment();
     let editableCompartment = new Compartment();
     let readOnlyCompartment = new Compartment();
     let placeholderCompartment = new Compartment();
+    let autocompleteWorker = new AutocompleteWorker();
 
-    $: mergedCollections = mergeWithBaseCollection($collections);
+    let cachedRequestKeys = [];
+    let cachedCollectionJoinKeys = [];
+    let cachedBaseKeys = [];
+    let baseKeysChangeHash = "";
+    let oldBaseKeysChangeHash = "";
+
+    $: baseKeysChangeHash = getCollectionKeysChangeHash(baseCollection);
+
+    $: if (
+        !disabled &&
+        (oldBaseKeysChangeHash != baseKeysChangeHash ||
+            disableRequestKeys !== -1 ||
+            disableCollectionJoinKeys !== -1)
+    ) {
+        oldBaseKeysChangeHash = baseKeysChangeHash;
+        refreshCachedKeys();
+    }
+
+    $: if (id) {
+        addLabelListeners();
+    }
 
     $: if (editor && baseCollection?.schema) {
         editor.dispatch({
@@ -89,13 +115,15 @@
         });
     }
 
-    $: if (editor && typeof disabled !== "undefined") {
+    $: if (editor && oldDisabledState != disabled) {
         editor.dispatch({
             effects: [
                 editableCompartment.reconfigure(EditorView.editable.of(!disabled)),
                 readOnlyCompartment.reconfigure(EditorState.readOnly.of(disabled)),
             ],
         });
+        oldDisabledState = disabled;
+        triggerNativeChange();
     }
 
     $: if (editor && value != editor.state.doc.toString()) {
@@ -119,10 +147,42 @@
         editor?.focus();
     }
 
-    // Replace the base collection in the provided list.
-    function mergeWithBaseCollection(collections) {
+    // Refresh the cached autocomplete keys.
+    // ---
+    let refreshDebounceId = null;
+
+    autocompleteWorker.onmessage = (e) => {
+        cachedBaseKeys = e.data.baseKeys || [];
+        cachedRequestKeys = e.data.requestKeys || [];
+        cachedCollectionJoinKeys = e.data.collectionJoinKeys || [];
+    };
+
+    function refreshCachedKeys() {
+        clearTimeout(refreshDebounceId);
+        refreshDebounceId = setTimeout(() => {
+            autocompleteWorker.postMessage({
+                baseCollection: baseCollection,
+                collections: concatWithBaseCollection($collections),
+                disableRequestKeys: disableRequestKeys,
+                disableCollectionJoinKeys: disableCollectionJoinKeys,
+            });
+        }, 250);
+    }
+    // ---
+
+    // Return a collection keys hash string that can be used to compare with previous states.
+    function getCollectionKeysChangeHash(collection) {
+        return JSON.stringify([collection?.name, collection?.type, collection?.schema]);
+    }
+
+    // Merge the base collection in a new list with the provided collections.
+    function concatWithBaseCollection(collections) {
         let copy = collections.slice();
-        CommonHelper.pushOrReplaceByKey(copy, baseCollection, "id");
+
+        if (baseCollection) {
+            CommonHelper.pushOrReplaceByKey(copy, baseCollection, "id");
+        }
+
         return copy;
     }
 
@@ -132,124 +192,102 @@
             new CustomEvent("change", {
                 detail: { value },
                 bubbles: true,
-            })
+            }),
         );
     }
 
-    // Returns list with all collection field keys recursively.
-    function getCollectionFieldKeys(nameOrId, prefix = "", level = 0) {
-        let collection = mergedCollections.find((item) => item.name == nameOrId || item.id == nameOrId);
-        if (!collection || level >= 4) {
-            return [];
+    // Remove any attached label listeners.
+    function removeLabelListeners() {
+        if (!id) {
+            return;
         }
 
-        let result = [
-            // base model fields
-            prefix + "id",
-            prefix + "created",
-            prefix + "updated",
-        ];
+        const labels = document.querySelectorAll('[for="' + id + '"]');
+        for (let label of labels) {
+            label.removeEventListener("click", focus);
+        }
+    }
 
-        for (const field of collection.schema) {
-            const key = prefix + field.name;
-            if (field.type === "relation" && field.options.collectionId) {
-                const subKeys = getCollectionFieldKeys(field.options.collectionId, key + ".", level + 1);
-                if (subKeys.length) {
-                    result = result.concat(subKeys);
-                } else {
-                    result.push(key);
-                }
-            } else {
-                result.push(key);
-            }
+    // Add `<label for="ID">...</label>` focus support.
+    function addLabelListeners() {
+        if (!id) {
+            return;
         }
 
-        return result;
+        removeLabelListeners();
+
+        const labels = document.querySelectorAll('[for="' + id + '"]');
+        for (let label of labels) {
+            label.addEventListener("click", focus);
+        }
     }
 
     // Returns an array with all the supported keys.
-    function getAllKeys(includeRequestKeys = true, includeIndirectCollectionsKeys = true) {
+    function getAllKeys(includeRequestKeys = true, includeCollectionJoinKeys = true) {
         let result = [].concat(extraAutocompleteKeys);
 
         // add base keys
-        const baseKeys = getCollectionFieldKeys(baseCollection.name);
-        for (const key of baseKeys) {
-            result.push(key);
-        }
+        result = result.concat(cachedBaseKeys || []);
 
-        // add base request keys
+        // add @request.* keys
         if (includeRequestKeys) {
-            result.push("@request.method");
-            result.push("@request.query.");
-            result.push("@request.data.");
-            result.push("@request.user.id");
-            result.push("@request.user.email");
-            result.push("@request.user.verified");
-            result.push("@request.user.created");
-            result.push("@request.user.updated");
+            result = result.concat(cachedRequestKeys || []);
         }
 
-        // add @collections and  @request.user.profile keys
-        if (includeRequestKeys || includeIndirectCollectionsKeys) {
-            for (const collection of mergedCollections) {
-                let prefix = "";
-                if (collection.name === import.meta.env.PB_PROFILE_COLLECTION) {
-                    if (!includeRequestKeys) {
-                        continue;
-                    }
-                    prefix = "@request.user.profile.";
-                } else {
-                    if (!includeIndirectCollectionsKeys) {
-                        continue;
-                    }
-                    prefix = "@collection." + collection.name + ".";
-                }
-
-                const keys = getCollectionFieldKeys(collection.name, prefix);
-                for (const key of keys) {
-                    result.push(key);
-                }
-            }
+        // add @collection.* keys
+        if (includeCollectionJoinKeys) {
+            result = result.concat(cachedCollectionJoinKeys || []);
         }
-
-        // sort longer keys first because the highlighter will highlight
-        // the first match and stops until an operator is found
-        result.sort(function (a, b) {
-            return b.length - a.length;
-        });
 
         return result;
     }
 
     // Returns object with all the completions matching the context.
     function completions(context) {
-        let word = context.matchBefore(/[\@\w\.]*/);
-        if (word.from == word.to && !context.explicit) {
+        let word = context.matchBefore(/[\'\"\@\w\.]*/);
+        if (word && word.from == word.to && !context.explicit) {
             return null;
         }
 
-        let options = [{ label: "null" }, { label: "false" }, { label: "true" }];
+        // skip for comments
+        let nodeBefore = syntaxTree(context.state).resolveInner(context.pos, -1);
+        if (nodeBefore?.type?.name == "comment") {
+            return null;
+        }
 
-        if (!disableIndirectCollectionsKeys) {
+        let options = [
+            { label: "false" },
+            { label: "true" },
+            { label: "@now" },
+            { label: "@second" },
+            { label: "@minute" },
+            { label: "@hour" },
+            { label: "@year" },
+            { label: "@day" },
+            { label: "@month" },
+            { label: "@weekday" },
+            { label: "@todayStart" },
+            { label: "@todayEnd" },
+            { label: "@monthStart" },
+            { label: "@monthEnd" },
+            { label: "@yearStart" },
+            { label: "@yearEnd" },
+        ];
+
+        if (!disableCollectionJoinKeys) {
             options.push({ label: "@collection.*", apply: "@collection." });
         }
 
-        const skipFields = [
-            "@request.user.profile.id",
-            "@request.user.profile.userId",
-            "@request.user.profile.created",
-            "@request.user.profile.updated",
-        ];
+        let keys = getAllKeys(
+            !disableRequestKeys && word.text.startsWith("@r"),
+            !disableCollectionJoinKeys && word.text.startsWith("@c"),
+        );
 
-        const keys = getAllKeys(!disableRequestKeys, !disableRequestKeys && word.text.startsWith("@c"));
         for (const key of keys) {
-            if (skipFields.includes(key)) {
-                continue;
-            }
-
             options.push({
                 label: key.endsWith(".") ? key + "*" : key,
                 apply: key,
+                boost: key.indexOf("_via_") > 0 ? -1 : 0, // deprioritize _via_ keys
             });
         }
 
@@ -257,25 +295,6 @@
             from: word.from,
             options: options,
         };
-    }
-
-    // Returns all field keys as keyword patterns to highlight.
-    function keywords() {
-        const result = [];
-        const keys = getAllKeys(!disableRequestKeys, !disableIndirectCollectionsKeys);
-
-        for (const key of keys) {
-            let pattern;
-            if (key.endsWith(".")) {
-                pattern = CommonHelper.escapeRegExp(key) + "\\w+[\\w.]*";
-            } else {
-                pattern = CommonHelper.escapeRegExp(key);
-            }
-
-            result.push({ regex: pattern, token: "keyword" });
-        }
-
-        return result;
     }
 
     // Creates a new language mode.
@@ -289,6 +308,8 @@
                         regex: /true|false|null/,
                         token: "atom",
                     },
+                    // comments
+                    { regex: /\/\/.*/, token: "comment" },
                     // double quoted string
                     { regex: /"(?:[^\\]|\\.)*?(?:"|$)/, token: "string" },
                     // single quoted string
@@ -306,8 +327,28 @@
                     // indent and dedent properties guide autoindentation
                     { regex: /[\{\[\(]/, indent: true },
                     { regex: /[\}\]\)]/, dedent: true },
-                ].concat(keywords()),
-            })
+                    // keywords
+                    { regex: /\w+[\w\.]*\w+/, token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@now"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@second"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@minute"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@hour"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@year"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@day"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@month"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@weekday"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@todayStart"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@todayEnd"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@monthStart"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@monthEnd"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@yearStart"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@yearEnd"), token: "keyword" },
+                    { regex: CommonHelper.escapeRegExp("@request.method"), token: "keyword" },
+                ],
+                meta: {
+                    lineComment: "//",
+                },
+            }),
         );
     }
 
@@ -321,6 +362,20 @@
                 }
             },
         };
+
+        addLabelListeners();
+
+        let keybindings = [
+            submitShortcut,
+            ...closeBracketsKeymap,
+            ...defaultKeymap,
+            searchKeymap.find((item) => item.key === "Mod-d"),
+            ...historyKeymap,
+            ...completionKeymap,
+        ];
+        if (!singleLine) {
+            keybindings.push(indentWithTab);
+        }
 
         editor = new EditorView({
             parent: container,
@@ -338,25 +393,25 @@
                     closeBrackets(),
                     rectangularSelection(),
                     highlightSelectionMatches(),
-                    keymap.of([
-                        submitShortcut,
-                        ...closeBracketsKeymap,
-                        ...defaultKeymap,
-                        ...searchKeymap,
-                        ...historyKeymap,
-                        ...completionKeymap,
-                    ]),
+                    keymap.of(keybindings),
                     EditorView.lineWrapping,
                     autocompletion({
                         override: [completions],
                         icons: false,
                     }),
                     placeholderCompartment.of(placeholderExt(placeholder)),
-                    editableCompartment.of(EditorView.editable.of(true)),
-                    readOnlyCompartment.of(EditorState.readOnly.of(false)),
+                    editableCompartment.of(EditorView.editable.of(!disabled)),
+                    readOnlyCompartment.of(EditorState.readOnly.of(disabled)),
                     langCompartment.of(ruleLang()),
                     EditorState.transactionFilter.of((tr) => {
-                        return singleLine && tr.newDoc.lines > 1 ? [] : tr;
+                        if (singleLine && tr.newDoc.lines > 1) {
+                            if (!tr.changes?.inserted?.filter((i) => !!i.text.find((t) => t))?.length) {
+                                return []; // only empty lines
+                            }
+                            // it is ok to mutate the current transaction as we don't change the doc length
+                            tr.newDoc.text = [tr.newDoc.text.join(" ")];
+                        }
+                        return tr;
                     }),
                     EditorView.updateListener.of((v) => {
                         if (!v.docChanged || disabled) {
@@ -369,7 +424,12 @@
             }),
         });
 
-        return () => editor?.destroy();
+        return () => {
+            clearTimeout(refreshDebounceId);
+            removeLabelListeners();
+            editor?.destroy();
+            autocompleteWorker.terminate();
+        };
     });
 </script>
 

@@ -1,10 +1,9 @@
 <script>
-    import Prism from "prismjs";
-    import "prismjs/plugins/normalize-whitespace/prism-normalize-whitespace.js";
-    import "@/scss/prism_light.scss";
-
     export let content = "";
-    export let language = "javascript"; // javascript, html
+    export let language = "javascript"; // javascript, html, dart, go, sql
+
+    let classes = "";
+    export { classes as class }; // export reserved keyword
 
     let formattedContent = "";
 
@@ -27,7 +26,7 @@
     }
 </script>
 
-<div class="code-wrapper prism-light">
+<div class="code-wrapper prism-light {classes}">
     <code>{@html formattedContent}</code>
 </div>
 
@@ -35,7 +34,7 @@
     code {
         display: block;
         width: 100%;
-        padding: var(--xsSpacing);
+        padding: 10px 15px;
         white-space: pre-wrap;
         word-break: break-word;
     }

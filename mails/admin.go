@@ -3,12 +3,13 @@ package mails
 import (
 	"fmt"
 	"net/mail"
-	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/mails/templates"
 	"github.com/pocketbase/pocketbase/models"
 	"github.com/pocketbase/pocketbase/tokens"
+	"github.com/pocketbase/pocketbase/tools/mailer"
+	"github.com/pocketbase/pocketbase/tools/rest"
 )
 
 // SendAdminPasswordReset sends a password reset request email to the specified admin.
@@ -18,9 +19,9 @@ func SendAdminPasswordReset(app core.App, admin *models.Admin) error {
 		return tokenErr
 	}
 
-	actionUrl, urlErr := normalizeUrl(fmt.Sprintf(
-		"%s/#/confirm-password-reset/%s",
-		strings.TrimSuffix(app.Settings().Meta.AppUrl, "/"),
+	actionUrl, urlErr := rest.NormalizeUrl(fmt.Sprintf(
+		"%s/_/#/confirm-password-reset/%s",
+		app.Settings().Meta.AppUrl,
 		token,
 	))
 	if urlErr != nil {
@@ -43,34 +44,33 @@ func SendAdminPasswordReset(app core.App, admin *models.Admin) error {
 
 	mailClient := app.NewMailClient()
 
-	event := &core.MailerAdminEvent{
-		MailClient: mailClient,
-		Admin:      admin,
-		Meta:       map[string]any{"token": token},
+	// resolve body template
+	body, renderErr := resolveTemplateContent(params, templates.Layout, templates.AdminPasswordResetBody)
+	if renderErr != nil {
+		return renderErr
 	}
 
-	sendErr := app.OnMailerBeforeAdminResetPasswordSend().Trigger(event, func(e *core.MailerAdminEvent) error {
-		// resolve body template
-		body, renderErr := resolveTemplateContent(params, templates.Layout, templates.AdminPasswordResetBody)
-		if renderErr != nil {
-			return renderErr
+	message := &mailer.Message{
+		From: mail.Address{
+			Name:    app.Settings().Meta.SenderName,
+			Address: app.Settings().Meta.SenderAddress,
+		},
+		To:      []mail.Address{{Address: admin.Email}},
+		Subject: "Reset admin password",
+		HTML:    body,
+	}
+
+	event := new(core.MailerAdminEvent)
+	event.MailClient = mailClient
+	event.Message = message
+	event.Admin = admin
+	event.Meta = map[string]any{"token": token}
+
+	return app.OnMailerBeforeAdminResetPasswordSend().Trigger(event, func(e *core.MailerAdminEvent) error {
+		if err := e.MailClient.Send(e.Message); err != nil {
+			return err
 		}
 
-		return e.MailClient.Send(
-			mail.Address{
-				Name:    app.Settings().Meta.SenderName,
-				Address: app.Settings().Meta.SenderAddress,
-			},
-			mail.Address{Address: e.Admin.Email},
-			"Reset admin password",
-			body,
-			nil,
-		)
+		return app.OnMailerAfterAdminResetPasswordSend().Trigger(e)
 	})
-
-	if sendErr == nil {
-		app.OnMailerAfterAdminResetPasswordSend().Trigger(event)
-	}
-
-	return sendErr
 }

@@ -1,22 +1,48 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
+	"github.com/pocketbase/pocketbase/tools/types"
 	"golang.org/x/oauth2"
 )
 
 // AuthUser defines a standardized oauth2 user data structure.
 type AuthUser struct {
-	Id        string `json:"id"`
-	Name      string `json:"name"`
-	Email     string `json:"email"`
-	AvatarUrl string `json:"avatarUrl"`
+	Id           string         `json:"id"`
+	Name         string         `json:"name"`
+	Username     string         `json:"username"`
+	Email        string         `json:"email"`
+	AvatarUrl    string         `json:"avatarUrl"`
+	AccessToken  string         `json:"accessToken"`
+	RefreshToken string         `json:"refreshToken"`
+	Expiry       types.DateTime `json:"expiry"`
+	RawUser      map[string]any `json:"rawUser"`
 }
 
 // Provider defines a common interface for an OAuth2 client.
 type Provider interface {
+	// Context returns the context associated with the provider (if any).
+	Context() context.Context
+
+	// SetContext assigns the specified context to the current provider.
+	SetContext(ctx context.Context)
+
+	// PKCE indicates whether the provider can use the PKCE flow.
+	PKCE() bool
+
+	// SetPKCE toggles the state whether the provider can use the PKCE flow or not.
+	SetPKCE(enable bool)
+
+	// DisplayName usually returns provider name as it is officially written
+	// and it could be used directly in the UI.
+	DisplayName() string
+
+	// SetDisplayName sets the provider's display name.
+	SetDisplayName(displayName string)
+
 	// Scopes returns the provider access permissions that will be requested.
 	Scopes() []string
 
@@ -72,7 +98,7 @@ type Provider interface {
 
 	// FetchRawUserData requests and marshalizes into `result` the
 	// the OAuth user api response.
-	FetchRawUserData(token *oauth2.Token, result any) error
+	FetchRawUserData(token *oauth2.Token) ([]byte, error)
 
 	// FetchAuthUser is similar to FetchRawUserData, but normalizes and
 	// marshalizes the user api response into a standardized AuthUser struct.
@@ -90,6 +116,48 @@ func NewProviderByName(name string) (Provider, error) {
 		return NewGithubProvider(), nil
 	case NameGitlab:
 		return NewGitlabProvider(), nil
+	case NameDiscord:
+		return NewDiscordProvider(), nil
+	case NameTwitter:
+		return NewTwitterProvider(), nil
+	case NameMicrosoft:
+		return NewMicrosoftProvider(), nil
+	case NameSpotify:
+		return NewSpotifyProvider(), nil
+	case NameKakao:
+		return NewKakaoProvider(), nil
+	case NameTwitch:
+		return NewTwitchProvider(), nil
+	case NameStrava:
+		return NewStravaProvider(), nil
+	case NameGitee:
+		return NewGiteeProvider(), nil
+	case NameLivechat:
+		return NewLivechatProvider(), nil
+	case NameGitea:
+		return NewGiteaProvider(), nil
+	case NameOIDC:
+		return NewOIDCProvider(), nil
+	case NameOIDC + "2":
+		return NewOIDCProvider(), nil
+	case NameOIDC + "3":
+		return NewOIDCProvider(), nil
+	case NameApple:
+		return NewAppleProvider(), nil
+	case NameInstagram:
+		return NewInstagramProvider(), nil
+	case NameVK:
+		return NewVKProvider(), nil
+	case NameYandex:
+		return NewYandexProvider(), nil
+	case NamePatreon:
+		return NewPatreonProvider(), nil
+	case NameMailcow:
+		return NewMailcowProvider(), nil
+	case NameBitbucket:
+		return NewBitbucketProvider(), nil
+	case NamePlanningcenter:
+		return NewPlanningcenterProvider(), nil
 	default:
 		return nil, errors.New("Missing provider " + name)
 	}

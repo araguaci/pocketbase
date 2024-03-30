@@ -43,7 +43,7 @@ func TestSimpleFieldResolverUpdateQuery(t *testing.T) {
 }
 
 func TestSimpleFieldResolverResolve(t *testing.T) {
-	r := search.NewSimpleFieldResolver("test", `^test_regex\d+$`, "Test columnify!")
+	r := search.NewSimpleFieldResolver("test", `^test_regex\d+$`, "Test columnify!", "data.test")
 
 	scenarios := []struct {
 		fieldName   string
@@ -58,10 +58,11 @@ func TestSimpleFieldResolverResolve(t *testing.T) {
 		{"test_regex", true, ""},
 		{"test_regex1", false, "[[test_regex1]]"},
 		{"Test columnify!", false, "[[Testcolumnify]]"},
+		{"data.test", false, "JSON_EXTRACT([[data]], '$.test')"},
 	}
 
 	for i, s := range scenarios {
-		name, params, err := r.Resolve(s.fieldName)
+		r, err := r.Resolve(s.fieldName)
 
 		hasErr := err != nil
 		if hasErr != s.expectError {
@@ -69,13 +70,17 @@ func TestSimpleFieldResolverResolve(t *testing.T) {
 			continue
 		}
 
-		if name != s.expectName {
-			t.Errorf("(%d) Expected name %q, got %q", i, s.expectName, name)
+		if hasErr {
+			continue
+		}
+
+		if r.Identifier != s.expectName {
+			t.Errorf("(%d) Expected r.Identifier %q, got %q", i, s.expectName, r.Identifier)
 		}
 
 		// params should be empty
-		if len(params) != 0 {
-			t.Errorf("(%d) Expected 0 params, got %v", i, params)
+		if len(r.Params) != 0 {
+			t.Errorf("(%d) Expected 0 r.Params, got %v", i, r.Params)
 		}
 	}
 }

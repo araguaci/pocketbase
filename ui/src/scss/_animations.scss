@@ -25,13 +25,14 @@
     }
 }
 
-
 @keyframes fadeIn {
     0% {
         opacity: 0;
+        visibility: hidden;
     }
     100% {
         opacity: 1;
+        visibility: visible;
     }
 }
 
@@ -49,5 +50,49 @@
     100% {
         opacity: 1;
         transform: scale(1);
+    }
+}
+
+@keyframes entranceLeft {
+    0% {
+        opacity: 0;
+        transform: translateX(-5px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes entranceRight {
+    0% {
+        opacity: 0;
+        transform: translateX(5px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes entranceTop {
+    0% {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes entranceBottom {
+    0% {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
     }
 }

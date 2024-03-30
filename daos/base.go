@@ -6,41 +6,110 @@ package daos
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/models"
 )
 
-// New creates a new Dao instance with the provided db builder.
+// New creates a new Dao instance with the provided db builder
+// (for both async and sync db operations).
 func New(db dbx.Builder) *Dao {
+	return NewMultiDB(db, db)
+}
+
+// NewMultiDB creates a new Dao instance with the provided dedicated
+// async and sync db builders.
+func NewMultiDB(concurrentDB, nonconcurrentDB dbx.Builder) *Dao {
 	return &Dao{
-		db: db,
+		concurrentDB:      concurrentDB,
+		nonconcurrentDB:   nonconcurrentDB,
+		MaxLockRetries:    8,
+		ModelQueryTimeout: 30 * time.Second,
 	}
 }
 
 // Dao handles various db operations.
-// Think of Dao as a repository and service layer in one.
+//
+// You can think of Dao as a repository and service layer in one.
 type Dao struct {
-	db dbx.Builder
+	// in a transaction both refer to the same *dbx.TX instance
+	concurrentDB    dbx.Builder
+	nonconcurrentDB dbx.Builder
 
-	BeforeCreateFunc func(eventDao *Dao, m models.Model) error
-	AfterCreateFunc  func(eventDao *Dao, m models.Model)
-	BeforeUpdateFunc func(eventDao *Dao, m models.Model) error
-	AfterUpdateFunc  func(eventDao *Dao, m models.Model)
-	BeforeDeleteFunc func(eventDao *Dao, m models.Model) error
-	AfterDeleteFunc  func(eventDao *Dao, m models.Model)
+	// MaxLockRetries specifies the default max "database is locked" auto retry attempts.
+	MaxLockRetries int
+
+	// ModelQueryTimeout is the default max duration of a running ModelQuery().
+	//
+	// This field has no effect if an explicit query context is already specified.
+	ModelQueryTimeout time.Duration
+
+	// write hooks
+	BeforeCreateFunc func(eventDao *Dao, m models.Model, action func() error) error
+	AfterCreateFunc  func(eventDao *Dao, m models.Model) error
+	BeforeUpdateFunc func(eventDao *Dao, m models.Model, action func() error) error
+	AfterUpdateFunc  func(eventDao *Dao, m models.Model) error
+	BeforeDeleteFunc func(eventDao *Dao, m models.Model, action func() error) error
+	AfterDeleteFunc  func(eventDao *Dao, m models.Model) error
 }
 
-// DB returns the internal db builder (*dbx.DB or *dbx.TX).
+// DB returns the default dao db builder (*dbx.DB or *dbx.TX).
+//
+// Currently the default db builder is dao.concurrentDB but that may change in the future.
 func (dao *Dao) DB() dbx.Builder {
-	return dao.db
+	return dao.ConcurrentDB()
 }
 
-// ModelQuery creates a new query with preset Select and From fields
-// based on the provided model argument.
+// ConcurrentDB returns the dao concurrent (aka. multiple open connections)
+// db builder (*dbx.DB or *dbx.TX).
+//
+// In a transaction the concurrentDB and nonconcurrentDB refer to the same *dbx.TX instance.
+func (dao *Dao) ConcurrentDB() dbx.Builder {
+	return dao.concurrentDB
+}
+
+// NonconcurrentDB returns the dao nonconcurrent (aka. single open connection)
+// db builder (*dbx.DB or *dbx.TX).
+//
+// In a transaction the concurrentDB and nonconcurrentDB refer to the same *dbx.TX instance.
+func (dao *Dao) NonconcurrentDB() dbx.Builder {
+	return dao.nonconcurrentDB
+}
+
+// Clone returns a new Dao with the same configuration options as the current one.
+func (dao *Dao) Clone() *Dao {
+	clone := *dao
+
+	return &clone
+}
+
+// WithoutHooks returns a new Dao with the same configuration options
+// as the current one, but without create/update/delete hooks.
+func (dao *Dao) WithoutHooks() *Dao {
+	clone := dao.Clone()
+
+	clone.BeforeCreateFunc = nil
+	clone.AfterCreateFunc = nil
+	clone.BeforeUpdateFunc = nil
+	clone.AfterUpdateFunc = nil
+	clone.BeforeDeleteFunc = nil
+	clone.AfterDeleteFunc = nil
+
+	return clone
+}
+
+// ModelQuery creates a new preconfigured select query with preset
+// SELECT, FROM and other common fields based on the provided model.
 func (dao *Dao) ModelQuery(m models.Model) *dbx.SelectQuery {
 	tableName := m.TableName()
-	return dao.db.Select(fmt.Sprintf("{{%s}}.*", tableName)).From(tableName)
+
+	return dao.DB().
+		Select("{{" + tableName + "}}.*").
+		From(tableName).
+		WithBuildHook(func(query *dbx.Query) {
+			query.WithExecHook(execLockRetry(dao.ModelQueryTimeout, dao.MaxLockRetries))
+		})
 }
 
 // FindById finds a single db record with the specified id and
@@ -49,58 +118,106 @@ func (dao *Dao) FindById(m models.Model, id string) error {
 	return dao.ModelQuery(m).Where(dbx.HashExp{"id": id}).Limit(1).One(m)
 }
 
+type afterCallGroup struct {
+	Model    models.Model
+	EventDao *Dao
+	Action   string
+}
+
 // RunInTransaction wraps fn into a transaction.
 //
-// It is safe to nest RunInTransaction calls.
+// It is safe to nest RunInTransaction calls as long as you use the txDao.
 func (dao *Dao) RunInTransaction(fn func(txDao *Dao) error) error {
-	switch txOrDB := dao.db.(type) {
+	switch txOrDB := dao.NonconcurrentDB().(type) {
 	case *dbx.Tx:
 		// nested transactions are not supported by default
 		// so execute the function within the current transaction
-		return fn(dao)
+		// ---
+		// create a new dao with the same hooks to avoid semaphore deadlock when nesting
+		txDao := New(txOrDB)
+		txDao.MaxLockRetries = dao.MaxLockRetries
+		txDao.ModelQueryTimeout = dao.ModelQueryTimeout
+		txDao.BeforeCreateFunc = dao.BeforeCreateFunc
+		txDao.BeforeUpdateFunc = dao.BeforeUpdateFunc
+		txDao.BeforeDeleteFunc = dao.BeforeDeleteFunc
+		txDao.AfterCreateFunc = dao.AfterCreateFunc
+		txDao.AfterUpdateFunc = dao.AfterUpdateFunc
+		txDao.AfterDeleteFunc = dao.AfterDeleteFunc
+
+		return fn(txDao)
 	case *dbx.DB:
-		return txOrDB.Transactional(func(tx *dbx.Tx) error {
+		afterCalls := []afterCallGroup{}
+
+		txError := txOrDB.Transactional(func(tx *dbx.Tx) error {
 			txDao := New(tx)
 
-			txDao.BeforeCreateFunc = func(eventDao *Dao, m models.Model) error {
-				if dao.BeforeCreateFunc != nil {
-					return dao.BeforeCreateFunc(eventDao, m)
-				}
-				return nil
-			}
-			txDao.AfterCreateFunc = func(eventDao *Dao, m models.Model) {
-				if dao.AfterCreateFunc != nil {
-					dao.AfterCreateFunc(eventDao, m)
+			if dao.BeforeCreateFunc != nil {
+				txDao.BeforeCreateFunc = func(eventDao *Dao, m models.Model, action func() error) error {
+					return dao.BeforeCreateFunc(eventDao, m, action)
 				}
 			}
-			txDao.BeforeUpdateFunc = func(eventDao *Dao, m models.Model) error {
-				if dao.BeforeUpdateFunc != nil {
-					return dao.BeforeUpdateFunc(eventDao, m)
-				}
-				return nil
-			}
-			txDao.AfterUpdateFunc = func(eventDao *Dao, m models.Model) {
-				if dao.AfterUpdateFunc != nil {
-					dao.AfterUpdateFunc(eventDao, m)
+			if dao.BeforeUpdateFunc != nil {
+				txDao.BeforeUpdateFunc = func(eventDao *Dao, m models.Model, action func() error) error {
+					return dao.BeforeUpdateFunc(eventDao, m, action)
 				}
 			}
-			txDao.BeforeDeleteFunc = func(eventDao *Dao, m models.Model) error {
-				if dao.BeforeDeleteFunc != nil {
-					return dao.BeforeDeleteFunc(eventDao, m)
+			if dao.BeforeDeleteFunc != nil {
+				txDao.BeforeDeleteFunc = func(eventDao *Dao, m models.Model, action func() error) error {
+					return dao.BeforeDeleteFunc(eventDao, m, action)
 				}
-				return nil
 			}
-			txDao.AfterDeleteFunc = func(eventDao *Dao, m models.Model) {
-				if dao.AfterDeleteFunc != nil {
-					dao.AfterDeleteFunc(eventDao, m)
+
+			if dao.AfterCreateFunc != nil {
+				txDao.AfterCreateFunc = func(eventDao *Dao, m models.Model) error {
+					afterCalls = append(afterCalls, afterCallGroup{m, eventDao, "create"})
+					return nil
+				}
+			}
+			if dao.AfterUpdateFunc != nil {
+				txDao.AfterUpdateFunc = func(eventDao *Dao, m models.Model) error {
+					afterCalls = append(afterCalls, afterCallGroup{m, eventDao, "update"})
+					return nil
+				}
+			}
+			if dao.AfterDeleteFunc != nil {
+				txDao.AfterDeleteFunc = func(eventDao *Dao, m models.Model) error {
+					afterCalls = append(afterCalls, afterCallGroup{m, eventDao, "delete"})
+					return nil
 				}
 			}
 
 			return fn(txDao)
 		})
+		if txError != nil {
+			return txError
+		}
+
+		// execute after event calls on successful transaction
+		// (note: using the non-transaction dao to allow following queries in the after hooks)
+		var errs []error
+		for _, call := range afterCalls {
+			var err error
+			switch call.Action {
+			case "create":
+				err = dao.AfterCreateFunc(dao, call.Model)
+			case "update":
+				err = dao.AfterUpdateFunc(dao, call.Model)
+			case "delete":
+				err = dao.AfterDeleteFunc(dao, call.Model)
+			}
+
+			if err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if len(errs) > 0 {
+			return fmt.Errorf("after transaction errors: %w", errors.Join(errs...))
+		}
+
+		return nil
 	}
 
-	return errors.New("Failed to start transaction (unknown dao.db)")
+	return errors.New("failed to start transaction (unknown dao.NonconcurrentDB() instance)")
 }
 
 // Delete deletes the provided model.
@@ -109,31 +226,41 @@ func (dao *Dao) Delete(m models.Model) error {
 		return errors.New("ID is not set")
 	}
 
-	if dao.BeforeDeleteFunc != nil {
-		if err := dao.BeforeDeleteFunc(dao, m); err != nil {
-			return err
+	return dao.lockRetry(func(retryDao *Dao) error {
+		action := func() error {
+			if err := retryDao.NonconcurrentDB().Model(m).Delete(); err != nil {
+				return err
+			}
+
+			if retryDao.AfterDeleteFunc != nil {
+				retryDao.AfterDeleteFunc(retryDao, m)
+			}
+
+			return nil
 		}
-	}
 
-	deleteErr := dao.db.Model(m).Delete()
-	if deleteErr != nil {
-		return deleteErr
-	}
+		if retryDao.BeforeDeleteFunc != nil {
+			return retryDao.BeforeDeleteFunc(retryDao, m, action)
+		}
 
-	if dao.AfterDeleteFunc != nil {
-		dao.AfterDeleteFunc(dao, m)
-	}
-
-	return nil
+		return action()
+	})
 }
 
-// Save upserts (update or create if primary key is not set) the provided model.
+// Save persists the provided model in the database.
+//
+// If m.IsNew() is true, the method will perform a create, otherwise an update.
+// To explicitly mark a model for update you can use m.MarkAsNotNew().
 func (dao *Dao) Save(m models.Model) error {
-	if m.HasId() {
-		return dao.update(m)
+	if m.IsNew() {
+		return dao.lockRetry(func(retryDao *Dao) error {
+			return retryDao.create(m)
+		})
 	}
 
-	return dao.create(m)
+	return dao.lockRetry(func(retryDao *Dao) error {
+		return retryDao.update(m)
+	})
 }
 
 func (dao *Dao) update(m models.Model) error {
@@ -141,38 +268,41 @@ func (dao *Dao) update(m models.Model) error {
 		return errors.New("ID is not set")
 	}
 
+	if m.GetCreated().IsZero() {
+		m.RefreshCreated()
+	}
+
 	m.RefreshUpdated()
 
+	action := func() error {
+		if v, ok := any(m).(models.ColumnValueMapper); ok {
+			dataMap := v.ColumnValueMap()
+
+			_, err := dao.NonconcurrentDB().Update(
+				m.TableName(),
+				dataMap,
+				dbx.HashExp{"id": m.GetId()},
+			).Execute()
+
+			if err != nil {
+				return err
+			}
+		} else if err := dao.NonconcurrentDB().Model(m).Update(); err != nil {
+			return err
+		}
+
+		if dao.AfterUpdateFunc != nil {
+			return dao.AfterUpdateFunc(dao, m)
+		}
+
+		return nil
+	}
+
 	if dao.BeforeUpdateFunc != nil {
-		if err := dao.BeforeUpdateFunc(dao, m); err != nil {
-			return err
-		}
+		return dao.BeforeUpdateFunc(dao, m, action)
 	}
 
-	if v, ok := any(m).(models.ColumnValueMapper); ok {
-		dataMap := v.ColumnValueMap()
-
-		_, err := dao.db.Update(
-			m.TableName(),
-			dataMap,
-			dbx.HashExp{"id": m.GetId()},
-		).Execute()
-
-		if err != nil {
-			return err
-		}
-	} else {
-		err := dao.db.Model(m).Update()
-		if err != nil {
-			return err
-		}
-	}
-
-	if dao.AfterUpdateFunc != nil {
-		dao.AfterUpdateFunc(dao, m)
-	}
-
-	return nil
+	return action()
 }
 
 func (dao *Dao) create(m models.Model) error {
@@ -180,6 +310,9 @@ func (dao *Dao) create(m models.Model) error {
 		// auto generate id
 		m.RefreshId()
 	}
+
+	// mark the model as "new" since the model now always has an ID
+	m.MarkAsNew()
 
 	if m.GetCreated().IsZero() {
 		m.RefreshCreated()
@@ -189,29 +322,51 @@ func (dao *Dao) create(m models.Model) error {
 		m.RefreshUpdated()
 	}
 
+	action := func() error {
+		if v, ok := any(m).(models.ColumnValueMapper); ok {
+			dataMap := v.ColumnValueMap()
+			if _, ok := dataMap["id"]; !ok {
+				dataMap["id"] = m.GetId()
+			}
+
+			_, err := dao.NonconcurrentDB().Insert(m.TableName(), dataMap).Execute()
+			if err != nil {
+				return err
+			}
+		} else if err := dao.NonconcurrentDB().Model(m).Insert(); err != nil {
+			return err
+		}
+
+		// clears the "new" model flag
+		m.MarkAsNotNew()
+
+		if dao.AfterCreateFunc != nil {
+			return dao.AfterCreateFunc(dao, m)
+		}
+
+		return nil
+	}
+
 	if dao.BeforeCreateFunc != nil {
-		if err := dao.BeforeCreateFunc(dao, m); err != nil {
-			return err
-		}
+		return dao.BeforeCreateFunc(dao, m, action)
 	}
 
-	if v, ok := any(m).(models.ColumnValueMapper); ok {
-		dataMap := v.ColumnValueMap()
+	return action()
+}
 
-		_, err := dao.db.Insert(m.TableName(), dataMap).Execute()
-		if err != nil {
-			return err
+func (dao *Dao) lockRetry(op func(retryDao *Dao) error) error {
+	retryDao := dao
+
+	return baseLockRetry(func(attempt int) error {
+		if attempt == 2 {
+			// assign new Dao without the before hooks to avoid triggering
+			// the already fired before callbacks multiple times
+			retryDao = NewMultiDB(dao.concurrentDB, dao.nonconcurrentDB)
+			retryDao.AfterCreateFunc = dao.AfterCreateFunc
+			retryDao.AfterUpdateFunc = dao.AfterUpdateFunc
+			retryDao.AfterDeleteFunc = dao.AfterDeleteFunc
 		}
-	} else {
-		err := dao.db.Model(m).Insert()
-		if err != nil {
-			return err
-		}
-	}
 
-	if dao.AfterCreateFunc != nil {
-		dao.AfterCreateFunc(dao, m)
-	}
-
-	return nil
+		return op(retryDao)
+	}, dao.MaxLockRetries)
 }

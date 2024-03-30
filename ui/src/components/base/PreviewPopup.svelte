@@ -5,20 +5,23 @@
     let panel;
     let url = "";
 
+    $: queryParamsIndex = url.indexOf("?");
+
+    $: filename = url.substring(
+        url.lastIndexOf("/") + 1,
+        queryParamsIndex > 0 ? queryParamsIndex : undefined
+    );
+
+    $: type = CommonHelper.getFileType(filename);
+
     export function show(newUrl) {
         if (newUrl === "") {
             return;
         }
 
-        CommonHelper.checkImageUrl(newUrl)
-            .then(() => {
-                url = newUrl;
-                panel?.show();
-            })
-            .catch(() => {
-                console.warn("Invalid image preview url: ", newUrl);
-                hide();
-            });
+        url = newUrl;
+
+        panel?.show();
     }
 
     export function hide() {
@@ -26,12 +29,33 @@
     }
 </script>
 
-<OverlayPanel bind:this={panel} class="image-preview" popup on:show on:hide>
-    <img src={url} alt="Preview" />
+<OverlayPanel bind:this={panel} class="preview preview-{type}" btnClose={false} popup on:show on:hide>
+    <svelte:fragment slot="header">
+        <button type="button" class="overlay-close" on:click|preventDefault={hide}>
+            <i class="ri-close-line" />
+        </button>
+    </svelte:fragment>
+
+    {#if panel?.isActive()}
+        {#if type === "image"}
+            <img src={url} alt="Preview {filename}" />
+        {:else}
+            <object title={filename} data={url}>Cannot preview the file.</object>
+        {/if}
+    {/if}
 
     <svelte:fragment slot="footer">
-        <a href={url} class="link-hint txt-ellipsis">/../{url.substring(url.lastIndexOf("/") + 1)}</a>
+        <a
+            href={url}
+            title={filename}
+            target="_blank"
+            rel="noreferrer noopener"
+            class="link-hint txt-ellipsis inline-flex"
+        >
+            {filename}
+            <i class="ri-external-link-line" />
+        </a>
         <div class="flex-fill" />
-        <button type="button" class="btn btn-secondary" on:click={hide}>Close</button>
+        <button type="button" class="btn btn-transparent" on:click={hide}>Close</button>
     </svelte:fragment>
 </OverlayPanel>

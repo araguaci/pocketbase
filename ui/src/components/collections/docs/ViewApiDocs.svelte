@@ -1,17 +1,18 @@
 <script>
-    import { Collection } from "pocketbase";
     import ApiClient from "@/utils/ApiClient";
     import CommonHelper from "@/utils/CommonHelper";
     import CodeBlock from "@/components/base/CodeBlock.svelte";
+    import SdkTabs from "@/components/collections/docs/SdkTabs.svelte";
+    import FieldsQueryParam from "@/components/collections/docs/FieldsQueryParam.svelte";
 
-    export let collection = new Collection();
+    export let collection;
 
     let responseTab = 200;
-    let sdkTab = "JavaScript";
     let responses = [];
-    let sdkExamples = [];
 
     $: adminsOnly = collection?.viewRule === null;
+
+    $: backendAbsUrl = CommonHelper.getApiExampleUrl(ApiClient.baseUrl);
 
     $: if (collection?.id) {
         responses.push({
@@ -43,26 +44,39 @@
             `,
         });
     }
-
-    $: sdkExamples = [
-        {
-            lang: "JavaScript",
-            code: `
-                import PocketBase from 'pocketbase';
-
-                const client = new PocketBase("${ApiClient.baseUrl}");
-
-                client.Records.getOne("${collection?.name}", "RECORD_ID")
-                    .then(function (record) {
-                        // success...
-                    }).catch(function (error) {
-                        // error...
-                    });
-            `,
-        },
-    ];
 </script>
 
+<h3 class="m-b-sm">View ({collection.name})</h3>
+<div class="content txt-lg m-b-sm">
+    <p>Fetch a single <strong>{collection.name}</strong> record.</p>
+</div>
+
+<SdkTabs
+    js={`
+        import PocketBase from 'pocketbase';
+
+        const pb = new PocketBase('${backendAbsUrl}');
+
+        ...
+
+        const record = await pb.collection('${collection?.name}').getOne('RECORD_ID', {
+            expand: 'relField1,relField2.subRelField',
+        });
+    `}
+    dart={`
+        import 'package:pocketbase/pocketbase.dart';
+
+        final pb = PocketBase('${backendAbsUrl}');
+
+        ...
+
+        final record = await pb.collection('${collection?.name}').getOne('RECORD_ID',
+          expand: 'relField1,relField2.subRelField',
+        );
+    `}
+/>
+
+<h6 class="m-b-xs">API details</h6>
 <div class="alert alert-info">
     <strong class="label label-primary">GET</strong>
     <div class="content">
@@ -71,38 +85,12 @@
         </p>
     </div>
     {#if adminsOnly}
-        <p class="txt-hint txt-sm txt-right">Requires <code>Authorization: Admin TOKEN</code> header</p>
+        <p class="txt-hint txt-sm txt-right">Requires admin <code>Authorization:TOKEN</code> header</p>
     {/if}
 </div>
 
-<div class="content m-b-base">
-    <p>Fetch a single <strong>{collection.name}</strong> record.</p>
-</div>
-
-<div class="section-title">Client SDKs example</div>
-<div class="tabs m-b-lg">
-    <div class="tabs-header compact left">
-        {#each sdkExamples as example (example.lang)}
-            <button
-                class="tab-item"
-                class:active={sdkTab === example.lang}
-                on:click={() => (sdkTab = example.lang)}
-            >
-                {example.lang}
-            </button>
-        {/each}
-    </div>
-    <div class="tabs-content">
-        {#each sdkExamples as example (example.lang)}
-            <div class="tab-item" class:active={sdkTab === example.lang}>
-                <CodeBlock content={example.code} />
-            </div>
-        {/each}
-    </div>
-</div>
-
 <div class="section-title">Path Parameters</div>
-<table class="table-compact table-border m-b-lg">
+<table class="table-compact table-border m-b-base">
     <thead>
         <tr>
             <th>Param</th>
@@ -122,7 +110,7 @@
 </table>
 
 <div class="section-title">Query parameters</div>
-<table class="table-compact table-border m-b-lg">
+<table class="table-compact table-border m-b-base">
     <thead>
         <tr>
             <th>Param</th>
@@ -137,24 +125,22 @@
                 <span class="label">String</span>
             </td>
             <td>
-                Auto expand nested record relations. Ex.:
-                <CodeBlock
-                    content={`
-                        ?expand=rel1,rel2.subrel21.subrel22
-                    `}
-                />
+                Auto expand record relations. Ex.:
+                <CodeBlock content={`?expand=relField1,relField2.subRelField`} />
                 Supports up to 6-levels depth nested relations expansion. <br />
                 The expanded relations will be appended to the record under the
-                <code>@expand</code> property (eg. <code>{`"@expand": {"rel1": {...}, ...}`}</code>). Only the
-                relations that the user has permissions to <strong>view</strong> will be expanded.
+                <code>expand</code> property (eg. <code>{`"expand": {"relField1": {...}, ...}`}</code>).
+                <br />
+                Only the relations to which the request user has permissions to <strong>view</strong> will be expanded.
             </td>
         </tr>
+        <FieldsQueryParam />
     </tbody>
 </table>
 
 <div class="section-title">Responses</div>
 <div class="tabs">
-    <div class="tabs-header compact left">
+    <div class="tabs-header compact combined left">
         {#each responses as response (response.code)}
             <button
                 class="tab-item"

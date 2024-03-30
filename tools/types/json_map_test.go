@@ -30,12 +30,52 @@ func TestJsonMapMarshalJSON(t *testing.T) {
 	}
 }
 
+func TestJsonMapGet(t *testing.T) {
+	scenarios := []struct {
+		json     types.JsonMap
+		key      string
+		expected any
+	}{
+		{nil, "test", nil},
+		{types.JsonMap{"test": 123}, "test", 123},
+		{types.JsonMap{"test": 123}, "missing", nil},
+	}
+
+	for i, s := range scenarios {
+		result := s.json.Get(s.key)
+		if result != s.expected {
+			t.Errorf("(%d) Expected %s, got %v", i, s.expected, result)
+		}
+	}
+}
+
+func TestJsonMapSet(t *testing.T) {
+	scenarios := []struct {
+		key   string
+		value any
+	}{
+		{"a", nil},
+		{"a", 123},
+		{"b", "test"},
+	}
+
+	for i, s := range scenarios {
+		j := types.JsonMap{}
+
+		j.Set(s.key, s.value)
+
+		if v := j[s.key]; v != s.value {
+			t.Errorf("(%d) Expected %s, got %v", i, s.value, v)
+		}
+	}
+}
+
 func TestJsonMapValue(t *testing.T) {
 	scenarios := []struct {
 		json     types.JsonMap
 		expected driver.Value
 	}{
-		{nil, nil},
+		{nil, `{}`},
 		{types.JsonMap{}, `{}`},
 		{types.JsonMap{"test1": 123, "test2": "lorem"}, `{"test1":123,"test2":"lorem"}`},
 		{types.JsonMap{"test": []int{1, 2, 3}}, `{"test":[1,2,3]}`},

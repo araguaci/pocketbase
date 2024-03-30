@@ -8,251 +8,473 @@ import (
 
 	"github.com/pocketbase/pocketbase/daos"
 	"github.com/pocketbase/pocketbase/models"
+	"github.com/pocketbase/pocketbase/models/schema"
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/list"
 )
 
 func TestExpandRecords(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
-	col, _ := app.Dao().FindCollectionByNameOrId("demo4")
-
 	scenarios := []struct {
-		recordIds         []string
-		expands           []string
-		fetchFunc         daos.ExpandFetchFunc
-		expectExpandProps int
-		expectError       bool
+		testName             string
+		collectionIdOrName   string
+		recordIds            []string
+		expands              []string
+		fetchFunc            daos.ExpandFetchFunc
+		expectExpandProps    int
+		expectExpandFailures int
 	}{
-		// empty records
 		{
+			"empty records",
+			"",
 			[]string{},
-			[]string{"onerel", "manyrels.onerel.manyrels"},
+			[]string{"self_rel_one", "self_rel_many.self_rel_one"},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			0,
-			false,
+			0,
 		},
-		// empty expand
 		{
-			[]string{"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b", "df55c8ff-45ef-4c82-8aed-6e2183fe1125"},
+			"empty expand",
+			"demo4",
+			[]string{"i9naidtvr6qsgb4", "qzaqccwrmva4o1n"},
 			[]string{},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			0,
-			false,
-		},
-		// empty fetchFunc
-		{
-			[]string{"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b", "df55c8ff-45ef-4c82-8aed-6e2183fe1125"},
-			[]string{"onerel", "manyrels.onerel.manyrels"},
-			nil,
 			0,
-			true,
 		},
-		// fetchFunc with error
 		{
-			[]string{"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b", "df55c8ff-45ef-4c82-8aed-6e2183fe1125"},
-			[]string{"onerel", "manyrels.onerel.manyrels"},
+			"fetchFunc with error",
+			"demo4",
+			[]string{"i9naidtvr6qsgb4", "qzaqccwrmva4o1n"},
+			[]string{"self_rel_one", "self_rel_many.self_rel_one"},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
 				return nil, errors.New("test error")
 			},
 			0,
-			true,
+			2,
 		},
-		// invalid missing first level expand
 		{
-			[]string{"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b", "df55c8ff-45ef-4c82-8aed-6e2183fe1125"},
-			[]string{"invalid"},
+			"missing relation field",
+			"demo4",
+			[]string{"i9naidtvr6qsgb4", "qzaqccwrmva4o1n"},
+			[]string{"missing"},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			0,
-			true,
+			1,
 		},
-		// invalid missing second level expand
 		{
-			[]string{"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b", "df55c8ff-45ef-4c82-8aed-6e2183fe1125"},
-			[]string{"manyrels.invalid"},
+			"existing, but non-relation type field",
+			"demo4",
+			[]string{"i9naidtvr6qsgb4", "qzaqccwrmva4o1n"},
+			[]string{"title"},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			0,
-			true,
+			1,
 		},
-		// expand normalizations
 		{
+			"invalid/missing second level expand",
+			"demo4",
+			[]string{"i9naidtvr6qsgb4", "qzaqccwrmva4o1n"},
+			[]string{"rel_one_no_cascade.title"},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			0,
+			1,
+		},
+		{
+			"with nil fetchfunc",
+			"users",
 			[]string{
-				"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
-				"df55c8ff-45ef-4c82-8aed-6e2183fe1125",
-				"b84cd893-7119-43c9-8505-3c4e22da28a9",
-				"054f9f24-0a0a-4e09-87b1-bc7ff2b336a2",
+				"bgs820n361vj1qd",
+				"4q1xlclmfloku33",
+				"oap640cot4yru2s", // no rels
 			},
-			[]string{"manyrels.onerel.manyrels.onerel", "manyrels.onerel", "onerel", "onerel.", " onerel ", ""},
+			[]string{"rel"},
+			nil,
+			2,
+			0,
+		},
+		{
+			"expand normalizations",
+			"demo4",
+			[]string{"i9naidtvr6qsgb4", "qzaqccwrmva4o1n"},
+			[]string{
+				"self_rel_one", "self_rel_many.self_rel_many.rel_one_no_cascade",
+				"self_rel_many.self_rel_one.self_rel_many.self_rel_one.rel_one_no_cascade",
+				"self_rel_many", "self_rel_many.",
+				"  self_rel_many  ", "",
+			},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			9,
-			false,
+			0,
 		},
-		// single expand
 		{
+			"single expand",
+			"users",
 			[]string{
-				"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
-				"df55c8ff-45ef-4c82-8aed-6e2183fe1125",
-				"b84cd893-7119-43c9-8505-3c4e22da28a9", // no manyrels
-				"054f9f24-0a0a-4e09-87b1-bc7ff2b336a2", // no manyrels
+				"bgs820n361vj1qd",
+				"4q1xlclmfloku33",
+				"oap640cot4yru2s", // no rels
 			},
-			[]string{"manyrels"},
+			[]string{"rel"},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			2,
-			false,
+			0,
 		},
-		// maxExpandDepth reached
 		{
-			[]string{"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b"},
-			[]string{"manyrels.onerel.manyrels.onerel.manyrels.onerel.manyrels.onerel.manyrels"},
+			"with nil fetchfunc",
+			"users",
+			[]string{
+				"bgs820n361vj1qd",
+				"4q1xlclmfloku33",
+				"oap640cot4yru2s", // no rels
+			},
+			[]string{"rel"},
+			nil,
+			2,
+			0,
+		},
+		{
+			"maxExpandDepth reached",
+			"demo4",
+			[]string{"qzaqccwrmva4o1n"},
+			[]string{"self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many"},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			6,
-			false,
+			0,
+		},
+		{
+			"simple back single relation field expand (deprecated syntax)",
+			"demo3",
+			[]string{"lcl9d87w22ml6jy"},
+			[]string{"demo4(rel_one_no_cascade_required)"},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			1,
+			0,
+		},
+		{
+			"simple back expand via single relation field",
+			"demo3",
+			[]string{"lcl9d87w22ml6jy"},
+			[]string{"demo4_via_rel_one_no_cascade_required"},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			1,
+			0,
+		},
+		{
+			"nested back expand via single relation field",
+			"demo3",
+			[]string{"lcl9d87w22ml6jy"},
+			[]string{
+				"demo4_via_rel_one_no_cascade_required.self_rel_many.self_rel_many.self_rel_one",
+			},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			5,
+			0,
+		},
+		{
+			"nested back expand via multiple relation field",
+			"demo3",
+			[]string{"lcl9d87w22ml6jy"},
+			[]string{
+				"demo4_via_rel_many_no_cascade_required.self_rel_many.rel_many_no_cascade_required.demo4_via_rel_many_no_cascade_required",
+			},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			7,
+			0,
+		},
+		{
+			"expand multiple relations sharing a common path",
+			"demo4",
+			[]string{"qzaqccwrmva4o1n"},
+			[]string{
+				"rel_one_no_cascade",
+				"rel_many_no_cascade",
+				"self_rel_many.self_rel_one.rel_many_cascade",
+				"self_rel_many.self_rel_one.rel_many_no_cascade_required",
+			},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			5,
+			0,
 		},
 	}
 
-	for i, s := range scenarios {
+	for _, s := range scenarios {
 		ids := list.ToUniqueStringSlice(s.recordIds)
-		records, _ := app.Dao().FindRecordsByIds(col, ids, nil)
-		err := app.Dao().ExpandRecords(records, s.expands, s.fetchFunc)
+		records, _ := app.Dao().FindRecordsByIds(s.collectionIdOrName, ids)
+		failed := app.Dao().ExpandRecords(records, s.expands, s.fetchFunc)
 
-		hasErr := err != nil
-		if hasErr != s.expectError {
-			t.Errorf("(%d) Expected hasErr to be %v, got %v (%v)", i, s.expectError, hasErr, err)
+		if len(failed) != s.expectExpandFailures {
+			t.Errorf("[%s] Expected %d failures, got %d: \n%v", s.testName, s.expectExpandFailures, len(failed), failed)
 		}
 
 		encoded, _ := json.Marshal(records)
 		encodedStr := string(encoded)
-		totalExpandProps := strings.Count(encodedStr, "@expand")
+		totalExpandProps := strings.Count(encodedStr, schema.FieldNameExpand)
 
 		if s.expectExpandProps != totalExpandProps {
-			t.Errorf("(%d) Expected %d @expand props in %v, got %d", i, s.expectExpandProps, encodedStr, totalExpandProps)
+			t.Errorf("[%s] Expected %d expand props, got %d: \n%v", s.testName, s.expectExpandProps, totalExpandProps, encodedStr)
 		}
 	}
 }
 
 func TestExpandRecord(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
-	col, _ := app.Dao().FindCollectionByNameOrId("demo4")
-
 	scenarios := []struct {
-		recordId          string
-		expands           []string
-		fetchFunc         daos.ExpandFetchFunc
-		expectExpandProps int
-		expectError       bool
+		testName             string
+		collectionIdOrName   string
+		recordId             string
+		expands              []string
+		fetchFunc            daos.ExpandFetchFunc
+		expectExpandProps    int
+		expectExpandFailures int
 	}{
-		// empty expand
 		{
-			"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
+			"empty expand",
+			"demo4",
+			"i9naidtvr6qsgb4",
 			[]string{},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			0,
-			false,
-		},
-		// empty fetchFunc
-		{
-			"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
-			[]string{"onerel", "manyrels.onerel.manyrels"},
-			nil,
 			0,
-			true,
 		},
-		// fetchFunc with error
 		{
-			"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
-			[]string{"onerel", "manyrels.onerel.manyrels"},
+			"fetchFunc with error",
+			"demo4",
+			"i9naidtvr6qsgb4",
+			[]string{"self_rel_one", "self_rel_many.self_rel_one"},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
 				return nil, errors.New("test error")
 			},
 			0,
-			true,
+			2,
 		},
-		// invalid missing first level expand
 		{
-			"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
-			[]string{"invalid"},
+			"missing relation field",
+			"demo4",
+			"i9naidtvr6qsgb4",
+			[]string{"missing"},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			0,
-			true,
-		},
-		// invalid missing second level expand
-		{
-			"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
-			[]string{"manyrels.invalid"},
-			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
-			},
-			0,
-			true,
-		},
-		// expand normalizations
-		{
-			"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
-			[]string{"manyrels.onerel.manyrels", "manyrels.onerel", "onerel", " onerel "},
-			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
-			},
-			3,
-			false,
-		},
-		// single expand
-		{
-			"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
-			[]string{"manyrels"},
-			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
-			},
 			1,
-			false,
 		},
-		// maxExpandDepth reached
 		{
-			"b8ba58f9-e2d7-42a0-b0e7-a11efd98236b",
-			[]string{"manyrels.onerel.manyrels.onerel.manyrels.onerel.manyrels.onerel.manyrels"},
+			"existing, but non-relation type field",
+			"demo4",
+			"i9naidtvr6qsgb4",
+			[]string{"title"},
 			func(c *models.Collection, ids []string) ([]*models.Record, error) {
-				return app.Dao().FindRecordsByIds(c, ids, nil)
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			0,
+			1,
+		},
+		{
+			"invalid/missing second level expand",
+			"demo4",
+			"qzaqccwrmva4o1n",
+			[]string{"rel_one_no_cascade.title"},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			0,
+			1,
+		},
+		{
+			"expand normalizations",
+			"demo4",
+			"qzaqccwrmva4o1n",
+			[]string{
+				"self_rel_one", "self_rel_many.self_rel_many.rel_one_no_cascade",
+				"self_rel_many.self_rel_one.self_rel_many.self_rel_one.rel_one_no_cascade",
+				"self_rel_many", "self_rel_many.",
+				"  self_rel_many  ", "",
+			},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			8,
+			0,
+		},
+		{
+			"no rels to expand",
+			"users",
+			"oap640cot4yru2s",
+			[]string{"rel"},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			0,
+			0,
+		},
+		{
+			"maxExpandDepth reached",
+			"demo4",
+			"qzaqccwrmva4o1n",
+			[]string{"self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many.self_rel_many"},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
 			},
 			6,
-			false,
+			0,
+		},
+		{
+			"simple indirect expand via single relation field (deprecated syntax)",
+			"demo3",
+			"lcl9d87w22ml6jy",
+			[]string{"demo4(rel_one_no_cascade_required)"},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			1,
+			0,
+		},
+		{
+			"simple indirect expand via single relation field",
+			"demo3",
+			"lcl9d87w22ml6jy",
+			[]string{"demo4_via_rel_one_no_cascade_required"},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			1,
+			0,
+		},
+		{
+			"nested indirect expand via single relation field",
+			"demo3",
+			"lcl9d87w22ml6jy",
+			[]string{
+				"demo4(rel_one_no_cascade_required).self_rel_many.self_rel_many.self_rel_one",
+			},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			5,
+			0,
+		},
+		{
+			"nested indirect expand via single relation field",
+			"demo3",
+			"lcl9d87w22ml6jy",
+			[]string{
+				"demo4_via_rel_many_no_cascade_required.self_rel_many.rel_many_no_cascade_required.demo4_via_rel_many_no_cascade_required",
+			},
+			func(c *models.Collection, ids []string) ([]*models.Record, error) {
+				return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+			},
+			7,
+			0,
 		},
 	}
 
-	for i, s := range scenarios {
-		record, _ := app.Dao().FindFirstRecordByData(col, "id", s.recordId)
-		err := app.Dao().ExpandRecord(record, s.expands, s.fetchFunc)
+	for _, s := range scenarios {
+		record, _ := app.Dao().FindRecordById(s.collectionIdOrName, s.recordId)
+		failed := app.Dao().ExpandRecord(record, s.expands, s.fetchFunc)
 
-		hasErr := err != nil
-		if hasErr != s.expectError {
-			t.Errorf("(%d) Expected hasErr to be %v, got %v (%v)", i, s.expectError, hasErr, err)
+		if len(failed) != s.expectExpandFailures {
+			t.Errorf("[%s] Expected %d failures, got %d: \n%v", s.testName, s.expectExpandFailures, len(failed), failed)
 		}
 
 		encoded, _ := json.Marshal(record)
 		encodedStr := string(encoded)
-		totalExpandProps := strings.Count(encodedStr, "@expand")
+		totalExpandProps := strings.Count(encodedStr, schema.FieldNameExpand)
 
 		if s.expectExpandProps != totalExpandProps {
-			t.Errorf("(%d) Expected %d @expand props in %v, got %d", i, s.expectExpandProps, encodedStr, totalExpandProps)
+			t.Errorf("[%s] Expected %d expand props, got %d: \n%v", s.testName, s.expectExpandProps, totalExpandProps, encodedStr)
+		}
+	}
+}
+
+func TestIndirectExpandSingeVsArrayResult(t *testing.T) {
+	t.Parallel()
+
+	app, _ := tests.NewTestApp()
+	defer app.Cleanup()
+
+	record, err := app.Dao().FindRecordById("demo3", "7nwo8tuiatetxdm")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// non-unique indirect expand
+	{
+		errs := app.Dao().ExpandRecord(record, []string{"demo4_via_rel_one_cascade"}, func(c *models.Collection, ids []string) ([]*models.Record, error) {
+			return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+		})
+		if len(errs) > 0 {
+			t.Fatal(errs)
+		}
+
+		result, ok := record.Expand()["demo4_via_rel_one_cascade"].([]*models.Record)
+		if !ok {
+			t.Fatalf("Expected the expanded result to be a slice, got %v", result)
+		}
+	}
+
+	// unique indirect expand
+	{
+		// mock a unique constraint for the rel_one_cascade field
+		// ---
+		demo4, err := app.Dao().FindCollectionByNameOrId("demo4")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		demo4.Indexes = append(demo4.Indexes, "create unique index idx_unique_expand on demo4 (rel_one_cascade)")
+
+		if err := app.Dao().SaveCollection(demo4); err != nil {
+			t.Fatalf("Failed to mock unique constraint: %v", err)
+		}
+		// ---
+
+		errs := app.Dao().ExpandRecord(record, []string{"demo4_via_rel_one_cascade"}, func(c *models.Collection, ids []string) ([]*models.Record, error) {
+			return app.Dao().FindRecordsByIds(c.Id, ids, nil)
+		})
+		if len(errs) > 0 {
+			t.Fatal(errs)
+		}
+
+		result, ok := record.Expand()["demo4_via_rel_one_cascade"].(*models.Record)
+		if !ok {
+			t.Fatalf("Expected the expanded result to be a single model, got %v", result)
 		}
 	}
 }

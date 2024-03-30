@@ -1,16 +1,15 @@
 <script>
-    import { SchemaField } from "pocketbase";
     import CommonHelper from "@/utils/CommonHelper";
     import Select from "@/components/base/Select.svelte";
     import Field from "@/components/base/Field.svelte";
 
-    export let field = new SchemaField();
+    export let field;
     export let value = undefined;
 
     $: isMultiple = field.options?.maxSelect > 1;
 
     $: if (typeof value === "undefined") {
-        value = isMultiple ? [] : null;
+        value = isMultiple ? [] : "";
     }
 
     $: if (isMultiple && Array.isArray(value) && value.length > field.options.maxSelect) {
@@ -27,8 +26,9 @@
         id={uniqueId}
         toggle={!field.required || isMultiple}
         multiple={isMultiple}
+        closable={!isMultiple || value?.length >= field.options?.maxSelect}
         items={field.options?.values}
-        searchable={field.options?.values > 5}
+        searchable={field.options?.values?.length > 5}
         bind:selected={value}
     />
     {#if field.options?.maxSelect > 1}

@@ -6,11 +6,12 @@ var _ Model = (*Request)(nil)
 
 // list with the supported values for `Request.Auth`
 const (
-	RequestAuthGuest = "guest"
-	RequestAuthUser  = "user"
-	RequestAuthAdmin = "admin"
+	RequestAuthGuest  = "guest"
+	RequestAuthAdmin  = "admin"
+	RequestAuthRecord = "authRecord"
 )
 
+// Deprecated: Replaced by the Log model and will be removed in a future version.
 type Request struct {
 	BaseModel
 
@@ -18,7 +19,8 @@ type Request struct {
 	Method    string        `db:"method" json:"method"`
 	Status    int           `db:"status" json:"status"`
 	Auth      string        `db:"auth" json:"auth"`
-	Ip        string        `db:"ip" json:"ip"`
+	UserIp    string        `db:"userIp" json:"userIp"`
+	RemoteIp  string        `db:"remoteIp" json:"remoteIp"`
 	Referer   string        `db:"referer" json:"referer"`
 	UserAgent string        `db:"userAgent" json:"userAgent"`
 	Meta      types.JsonMap `db:"meta" json:"meta"`

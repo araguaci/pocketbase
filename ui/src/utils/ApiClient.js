@@ -1,10 +1,14 @@
-import PocketBase, { LocalAuthStore, Admin } from "pocketbase";
+import PocketBase, { LocalAuthStore, isTokenExpired } from "pocketbase";
 // ---
-import CommonHelper      from "@/utils/CommonHelper";
-import { replace }       from "svelte-spa-router";
-import { addErrorToast } from "@/stores/toasts";
-import { setErrors }     from "@/stores/errors";
-import { setAdmin }      from "@/stores/admin";
+import CommonHelper                     from "@/utils/CommonHelper";
+import { replace }                      from "svelte-spa-router";
+import { get }                          from "svelte/store";
+import { addErrorToast }                from "@/stores/toasts";
+import { setErrors }                    from "@/stores/errors";
+import { setAdmin }                     from "@/stores/admin";
+import { protectedFilesCollectionsCache } from "@/stores/collections";
+
+const adminFileTokenKey = "pb_admin_file_token";
 
 /**
  * Clears the authorized state and redirects to the login page.
@@ -12,10 +16,10 @@ import { setAdmin }      from "@/stores/admin";
  * @param {Boolean} [redirect] Whether to redirect to the login page.
  */
 PocketBase.prototype.logout = function(redirect = true) {
-    this.AuthStore.clear();
+    this.authStore.clear();
 
     if (redirect) {
-        replace('/login');
+        replace("/login");
     }
 };
 
@@ -26,23 +30,18 @@ PocketBase.prototype.logout = function(redirect = true) {
  * @param  {Boolean} notify     Whether to add a toast notification.
  * @param  {String}  defaultMsg Default toast notification message if the error doesn't have one.
  */
-PocketBase.prototype.errorResponseHandler = function(err, notify = true, defaultMsg = '') {
-    if (!err || !(err instanceof Error)) {
+PocketBase.prototype.error = function(err, notify = true, defaultMsg = "") {
+    if (!err || !(err instanceof Error) || err.isAbort) {
         return;
     }
 
-    const statusCode = (err?.response?.status << 0) || 400;
-    const responseData = err?.response?.data || {};
+    const statusCode = (err?.status << 0) || 400;
+    const responseData = err?.data || {};
+    const msg = responseData.message || err.message || defaultMsg;
 
     // add toast error notification
-    if (
-        notify &&          // notifications are enabled
-        statusCode !== 404 // is not 404
-    ) {
-        let msg = responseData.message || err.message || defaultMsg;
-        if (msg) {
-            addErrorToast(msg);
-        }
+    if (notify && msg) {
+        addErrorToast(msg);
     }
 
     // populate form field errors
@@ -59,9 +58,45 @@ PocketBase.prototype.errorResponseHandler = function(err, notify = true, default
     // forbidden
     if (statusCode === 403) {
         this.cancelAllRequests();
-        return replace('/');
+        return replace("/");
     }
 };
+
+/**
+ * @return {Promise<String>}
+ */
+PocketBase.prototype.getAdminFileToken = async function(collectionId = "") {
+    let needToken = true;
+
+    if (collectionId) {
+        const protectedCollections = get(protectedFilesCollectionsCache);
+        needToken = typeof protectedCollections[collectionId] !== "undefined"
+            ? protectedCollections[collectionId]
+            : true;
+    }
+
+    if (!needToken) {
+        return "";
+    }
+
+    let token = localStorage.getItem(adminFileTokenKey) || "";
+
+    // request a new token only if the previous one is missing or will expire soon
+    if (!token || isTokenExpired(token, 10)) {
+        // remove previously stored token (if any)
+        token && localStorage.removeItem(adminFileTokenKey);
+
+        if (!this._adminFileTokenRequest) {
+            this._adminFileTokenRequest = this.files.getToken();
+        }
+
+        token = await this._adminFileTokenRequest;
+        localStorage.setItem(adminFileTokenKey, token);
+        this._adminFileTokenRequest = null;
+    }
+
+    return token;
+}
 
 // Custom auth store to sync the svelte admin store state with the authorized admin instance.
 class AppAuthStore extends LocalAuthStore {
@@ -71,7 +106,7 @@ class AppAuthStore extends LocalAuthStore {
     save(token, model) {
         super.save(token, model);
 
-        if (model instanceof Admin) {
+        if (model && !model.collectionId) { // not an auth record
             setAdmin(model);
         }
     }
@@ -81,18 +116,18 @@ class AppAuthStore extends LocalAuthStore {
      */
     clear() {
         super.clear();
+
         setAdmin(null);
     }
 }
 
-const client = new PocketBase(
+const pb = new PocketBase(
     import.meta.env.PB_BACKEND_URL,
-    'en-US',
     new AppAuthStore("pb_admin_auth")
 );
 
-if (client.AuthStore.model instanceof Admin) {
-    setAdmin(client.AuthStore.model);
+if (pb.authStore.model && !pb.authStore.model.collectionId) { // not an auth record
+    setAdmin(pb.authStore.model);
 }
 
-export default client;
+export default pb;

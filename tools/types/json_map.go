@@ -13,7 +13,7 @@ type JsonMap map[string]any
 func (m JsonMap) MarshalJSON() ([]byte, error) {
 	type alias JsonMap // prevent recursion
 
-	// inialize an empty map to ensure that `{}` is returned as json
+	// initialize an empty map to ensure that `{}` is returned as json
 	if m == nil {
 		m = JsonMap{}
 	}
@@ -21,12 +21,24 @@ func (m JsonMap) MarshalJSON() ([]byte, error) {
 	return json.Marshal(alias(m))
 }
 
+// Get retrieves a single value from the current JsonMap.
+//
+// This helper was added primarily to assist the goja integration since custom map types
+// don't have direct access to the map keys (https://pkg.go.dev/github.com/dop251/goja#hdr-Maps_with_methods).
+func (m JsonMap) Get(key string) any {
+	return m[key]
+}
+
+// Set sets a single value in the current JsonMap.
+//
+// This helper was added primarily to assist the goja integration since custom map types
+// don't have direct access to the map keys (https://pkg.go.dev/github.com/dop251/goja#hdr-Maps_with_methods).
+func (m JsonMap) Set(key string, value any) {
+	m[key] = value
+}
+
 // Value implements the [driver.Valuer] interface.
 func (m JsonMap) Value() (driver.Value, error) {
-	if m == nil {
-		return nil, nil
-	}
-
 	data, err := json.Marshal(m)
 
 	return string(data), err

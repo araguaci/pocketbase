@@ -41,10 +41,6 @@
         max-width: 100%;
     }
 
-    hr {
-        background: var(--baseAlt2Color);
-    }
-
     // header
     .panel-header {
         position: relative;
@@ -79,8 +75,8 @@
             text-align: center;
             font-size: 1.6rem;
             line-height: 1;
-            border-top-left-radius: $size;
-            border-bottom-left-radius: $size;
+            border-top-left-radius: 50%;
+            border-bottom-left-radius: 50%;
             border-top-right-radius: 0;
             border-bottom-right-radius: 0;
             color: #fff;
@@ -105,7 +101,7 @@
             margin-right: -10px;
         }
         .tabs-header {
-            margin-bottom: -23px;
+            margin-bottom: -24px;
         }
     }
 
@@ -117,6 +113,10 @@
         overflow-x: hidden;
         overflow-y: auto; /* fallback */
         overflow-y: overlay;
+        scroll-behavior: smooth;
+        .tox-fullscreen & {
+            z-index: 9;
+        }
     }
     .panel-header ~ .panel-content {
         padding-top: 5px;
@@ -154,7 +154,7 @@
         width: 850px;
     }
     &.overlay-panel-lg {
-        width: 650px;
+        width: 700px;
     }
     &.overlay-panel-sm {
         width: 460px;
@@ -182,19 +182,53 @@
             border-bottom: 1px solid var(--baseAlt1Color);
             .tabs-header {
                 border-bottom: 0;
+                .tab-item {
+                    border: 1px solid transparent;
+                    border-bottom: 0;
+                    &:hover,
+                    &:focus-visible {
+                        background: var(--baseAlt1Color);
+                    }
+                    &:after {
+                        content: none;
+                        display: none;;
+                    }
+                }
+                .tab-item.active {
+                    background: var(--baseColor);
+                    border-color: var(--baseAlt1Color);
+
+                }
             }
         }
         .panel-header ~ .panel-content {
             padding-top: calc(var(--baseSpacing) - 5px);
         }
     }
-    &.image-preview {
-        width: auto;
-        min-width: 300px;
-        max-width: 70%;
+    &.compact-header {
+        .panel-header {
+            row-gap: var(--smSpacing);
+        }
+    }
+    &.full-width-popup {
+        width: 100%;
+    }
+    &.preview {
         .panel-header {
             position: absolute;
             z-index: 99;
+            box-shadow: none;
+            .overlay-close {
+                left: 100%;
+                right: auto;
+                border-top-left-radius: 0;
+                border-bottom-left-radius: 0;
+                border-top-right-radius: 50%;
+                border-bottom-right-radius: 50%;
+                i {
+                    margin-right: 5px;
+                }
+            }
         }
         .panel-header,
         .panel-footer {
@@ -203,11 +237,49 @@
         .panel-content {
             padding: 0;
             text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
+
+        // preview elements
         img {
             max-width: 100%;
             border-top-left-radius: var(--baseRadius);
             border-top-right-radius: var(--baseRadius);
+        }
+        object {
+            position: absolute;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        // preview variants
+        &.preview-image {
+            width: auto;
+            min-width: 320px;
+            min-height: 300px;
+            max-width: 75%;
+            max-height: 90%;
+            img {
+                align-self: flex-start;
+                margin: auto;
+            }
+        }
+
+        &.preview-document,
+        &.preview-video {
+            width: 75%;
+            height: 90%;
+        }
+        &.preview-audio {
+            min-width: 320px;
+            min-height: 300px;
+            max-width: 90%;
+            max-height: 90%;
         }
     }
 

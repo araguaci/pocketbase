@@ -8,6 +8,8 @@ import (
 )
 
 func TestNewAdminAuthToken(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -31,6 +33,8 @@ func TestNewAdminAuthToken(t *testing.T) {
 }
 
 func TestNewAdminResetPasswordToken(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -47,6 +51,31 @@ func TestNewAdminResetPasswordToken(t *testing.T) {
 	tokenAdmin, _ := app.Dao().FindAdminByToken(
 		token,
 		app.Settings().AdminPasswordResetToken.Secret,
+	)
+	if tokenAdmin == nil || tokenAdmin.Id != admin.Id {
+		t.Fatalf("Expected admin %v, got %v", admin, tokenAdmin)
+	}
+}
+
+func TestNewAdminFileToken(t *testing.T) {
+	t.Parallel()
+
+	app, _ := tests.NewTestApp()
+	defer app.Cleanup()
+
+	admin, err := app.Dao().FindAdminByEmail("test@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token, err := tokens.NewAdminFileToken(app, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tokenAdmin, _ := app.Dao().FindAdminByToken(
+		token,
+		app.Settings().AdminFileToken.Secret,
 	)
 	if tokenAdmin == nil || tokenAdmin.Id != admin.Id {
 		t.Fatalf("Expected admin %v, got %v", admin, tokenAdmin)

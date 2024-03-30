@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -52,68 +53,138 @@ func TestRunnerUpAndDown(t *testing.T) {
 	}
 	defer testDB.Close()
 
-	var test1UpCalled bool
-	var test1DownCalled bool
-	var test2UpCalled bool
-	var test2DownCalled bool
+	callsOrder := []string{}
 
 	l := MigrationsList{}
 	l.Register(func(db dbx.Builder) error {
-		test1UpCalled = true
+		callsOrder = append(callsOrder, "up2")
 		return nil
 	}, func(db dbx.Builder) error {
-		test1DownCalled = true
-		return nil
-	}, "1_test")
-	l.Register(func(db dbx.Builder) error {
-		test2UpCalled = true
-		return nil
-	}, func(db dbx.Builder) error {
-		test2DownCalled = true
+		callsOrder = append(callsOrder, "down2")
 		return nil
 	}, "2_test")
+	l.Register(func(db dbx.Builder) error {
+		callsOrder = append(callsOrder, "up3")
+		return nil
+	}, func(db dbx.Builder) error {
+		callsOrder = append(callsOrder, "down3")
+		return nil
+	}, "3_test")
+	l.Register(func(db dbx.Builder) error {
+		callsOrder = append(callsOrder, "up1")
+		return nil
+	}, func(db dbx.Builder) error {
+		callsOrder = append(callsOrder, "down1")
+		return nil
+	}, "1_test")
 
 	r, err := NewRunner(testDB.DB, l)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// simulate partially run migration
-	r.saveAppliedMigration(testDB, r.migrationsList.Item(0).file)
+	// simulate partially out-of-order run migration
+	r.saveAppliedMigration(testDB, "2_test")
 
+	// ---------------------------------------------------------------
 	// Up()
-	// ---
+	// ---------------------------------------------------------------
+
 	if _, err := r.Up(); err != nil {
 		t.Fatal(err)
 	}
 
-	if test1UpCalled {
-		t.Fatalf("Didn't expect 1_test to be called")
+	expectedUpCallsOrder := `["up1","up3"]` // skip up2 since it was applied previously
+
+	upCallsOrder, err := json.Marshal(callsOrder)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if !test2UpCalled {
-		t.Fatalf("Expected 2_test to be called")
+	if v := string(upCallsOrder); v != expectedUpCallsOrder {
+		t.Fatalf("Expected Up() calls order %s, got %s", expectedUpCallsOrder, upCallsOrder)
 	}
+
+	// ---------------------------------------------------------------
+
+	// reset callsOrder
+	callsOrder = []string{}
 
 	// simulate unrun migration
-	var test3DownCalled bool
 	r.migrationsList.Register(nil, func(db dbx.Builder) error {
-		test3DownCalled = true
+		callsOrder = append(callsOrder, "down4")
 		return nil
-	}, "3_test")
+	}, "4_test")
 
+	// ---------------------------------------------------------------
+
+	// ---------------------------------------------------------------
 	// Down()
-	// ---
+	// ---------------------------------------------------------------
+
 	if _, err := r.Down(2); err != nil {
 		t.Fatal(err)
 	}
 
-	if test3DownCalled {
-		t.Fatal("Didn't expect 3_test to be reverted.")
+	expectedDownCallsOrder := `["down3","down1"]` // revert in the applied order
+
+	downCallsOrder, err := json.Marshal(callsOrder)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if !test1DownCalled || !test2DownCalled {
-		t.Fatalf("Expected 1_test and 2_test to be reverted, got %v and %v", test1DownCalled, test2DownCalled)
+	if v := string(downCallsOrder); v != expectedDownCallsOrder {
+		t.Fatalf("Expected Down() calls order %s, got %s", expectedDownCallsOrder, downCallsOrder)
+	}
+}
+
+func TestHistorySync(t *testing.T) {
+	testDB, err := createTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer testDB.Close()
+
+	// mock migrations history
+	l := MigrationsList{}
+	l.Register(func(db dbx.Builder) error {
+		return nil
+	}, func(db dbx.Builder) error {
+		return nil
+	}, "1_test")
+	l.Register(func(db dbx.Builder) error {
+		return nil
+	}, func(db dbx.Builder) error {
+		return nil
+	}, "2_test")
+	l.Register(func(db dbx.Builder) error {
+		return nil
+	}, func(db dbx.Builder) error {
+		return nil
+	}, "3_test")
+
+	r, err := NewRunner(testDB.DB, l)
+	if err != nil {
+		t.Fatalf("Failed to initialize the runner: %v", err)
+	}
+
+	if _, err := r.Up(); err != nil {
+		t.Fatalf("Failed to apply the mock migrations: %v", err)
+	}
+
+	if !r.isMigrationApplied(testDB.DB, "2_test") {
+		t.Fatalf("Expected 2_test migration to be applied")
+	}
+
+	// mock deleted migrations
+	r.migrationsList.list = []*Migration{r.migrationsList.list[0], r.migrationsList.list[2]}
+
+	if err := r.removeMissingAppliedMigrations(); err != nil {
+		t.Fatalf("Failed to remove missing applied migrations: %v", err)
+	}
+
+	if r.isMigrationApplied(testDB.DB, "2_test") {
+		t.Fatalf("Expected 2_test migration to NOT be applied")
 	}
 }
 

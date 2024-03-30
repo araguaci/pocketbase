@@ -1,54 +1,64 @@
 <script>
+    import { replace, querystring } from "svelte-spa-router";
     import ApiClient from "@/utils/ApiClient";
     import CommonHelper from "@/utils/CommonHelper";
+    import { pageTitle } from "@/stores/app";
     import { admin as loggedAdmin } from "@/stores/admin";
+    import PageWrapper from "@/components/base/PageWrapper.svelte";
     import Searchbar from "@/components/base/Searchbar.svelte";
     import RefreshButton from "@/components/base/RefreshButton.svelte";
     import SortHeader from "@/components/base/SortHeader.svelte";
-    import IdLabel from "@/components/base/IdLabel.svelte";
     import FormattedDate from "@/components/base/FormattedDate.svelte";
+    import Scroller from "@/components/base/Scroller.svelte";
+    import CopyIcon from "@/components/base/CopyIcon.svelte";
     import SettingsSidebar from "@/components/settings/SettingsSidebar.svelte";
     import AdminUpsertPanel from "@/components/admins/AdminUpsertPanel.svelte";
 
-    const queryParams = CommonHelper.getQueryParams(window.location?.href);
+    $pageTitle = "Admins";
+
+    const queryParams = new URLSearchParams($querystring);
 
     let adminUpsertPanel;
     let admins = [];
     let isLoading = false;
-    let filter = queryParams.filter || "";
-    let sort = queryParams.sort || "-created";
+    let filter = queryParams.get("filter") || "";
+    let sort = queryParams.get("sort") || "-created";
 
     $: if (sort !== -1 && filter !== -1) {
         // keep listing params in sync
-        CommonHelper.replaceClientQueryParams({
-            filter: filter,
-            sort: sort,
-        });
+        const query = new URLSearchParams({ filter, sort }).toString();
+        replace("/settings/admins?" + query);
 
         loadAdmins();
     }
-
-    CommonHelper.setDocumentTitle("Admins");
 
     export function loadAdmins() {
         isLoading = true;
 
         admins = []; // reset
 
-        return ApiClient.Admins.getFullList(100, {
-            sort: sort || "-created",
-            filter: filter,
-        })
+        const normalizedFilter = CommonHelper.normalizeSearchFilter(filter, [
+            "id",
+            "email",
+            "created",
+            "updated",
+        ]);
+
+        return ApiClient.admins
+            .getFullList(100, {
+                sort: sort || "-created",
+                filter: normalizedFilter,
+            })
             .then((result) => {
                 admins = result;
                 isLoading = false;
             })
             .catch((err) => {
-                if (err !== null) {
+                if (!err?.isAbort) {
                     isLoading = false;
                     console.warn(err);
                     clearList();
-                    ApiClient.errorResponseHandler(err, false);
+                    ApiClient.error(err, !normalizedFilter || err?.status != 400); // silence filter errors
                 }
             });
     }
@@ -60,31 +70,34 @@
 
 <SettingsSidebar />
 
-<main class="page-wrapper">
+<PageWrapper>
     <header class="page-header">
         <nav class="breadcrumbs">
             <div class="breadcrumb-item">Settings</div>
-            <div class="breadcrumb-item">Admins</div>
+            <div class="breadcrumb-item">{$pageTitle}</div>
         </nav>
 
         <RefreshButton on:refresh={() => loadAdmins()} />
 
         <div class="flex-fill" />
 
-        <button type="button" class="btn btn-expanded" on:click={() => adminUpsertPanel?.show()}>
-            <i class="ri-add-line" />
-            <span class="txt">New admin</span>
-        </button>
+        <div class="btns-group">
+            <button type="button" class="btn btn-expanded" on:click={() => adminUpsertPanel?.show()}>
+                <i class="ri-add-line" />
+                <span class="txt">New admin</span>
+            </button>
+        </div>
     </header>
 
     <Searchbar
         value={filter}
-        placeholder={"Search filter, eg. email='test@example.com'"}
+        placeholder={"Search term or filter like email='test@example.com'"}
         extraAutocompleteKeys={["email"]}
         on:submit={(e) => (filter = e.detail)}
     />
+    <div class="clearfix m-b-base" />
 
-    <div class="table-wrapper">
+    <Scroller class="table-wrapper">
         <table class="table" class:table-loading={isLoading}>
             <thead>
                 <tr>
@@ -143,8 +156,12 @@
                                 />
                             </figure>
                         </td>
+
                         <td class="col-type-text col-field-id">
-                            <IdLabel id={admin.id} />
+                            <div class="label">
+                                <CopyIcon value={admin.id} />
+                                <span class="txt">{admin.id}</span>
+                            </div>
                             {#if admin.id === $loggedAdmin.id}
                                 <span class="label label-warning m-l-5">You</span>
                             {/if}
@@ -159,9 +176,11 @@
                         <td class="col-type-date col-field-created">
                             <FormattedDate date={admin.created} />
                         </td>
+
                         <td class="col-type-date col-field-updated">
                             <FormattedDate date={admin.updated} />
                         </td>
+
                         <td class="col-type-action min-width">
                             <i class="ri-arrow-right-line" />
                         </td>
@@ -170,7 +189,7 @@
                     {#if isLoading}
                         <tr>
                             <td colspan="99" class="p-xs">
-                                <span class="skeleton-loader" />
+                                <span class="skeleton-loader m-0" />
                             </td>
                         </tr>
                     {:else}
@@ -192,11 +211,11 @@
                 {/each}
             </tbody>
         </table>
-    </div>
+    </Scroller>
 
-    {#if admins.length}
-        <small class="block txt-hint txt-right m-t-sm">Showing {admins.length} of {admins.length}</small>
-    {/if}
-</main>
+    <svelte:fragment slot="footer">
+        <div class="m-r-auto txt-sm txt-hint">Total found: {admins.length}</div>
+    </svelte:fragment>
+</PageWrapper>
 
 <AdminUpsertPanel bind:this={adminUpsertPanel} on:save={() => loadAdmins()} on:delete={() => loadAdmins()} />

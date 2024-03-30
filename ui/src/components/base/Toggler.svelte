@@ -5,28 +5,81 @@
     export let trigger = undefined;
     export let active = false;
     export let escClose = true;
+    export let autoScroll = true;
     export let closableClass = "closable";
     let classes = "";
     export { classes as class }; // export reserved keyword
 
     let container;
+    let containerChild;
+    let activeTrigger;
+    let scrollTimeoutId;
+    let hideTimeoutId;
+    let isOutsideMouseDown = false;
 
     const dispatch = createEventDispatcher();
 
+    $: if (container) {
+        bindTrigger(trigger);
+    }
+
     $: if (active) {
-        trigger?.classList?.add("active");
+        activeTrigger?.classList?.add("active");
         dispatch("show");
     } else {
-        trigger?.classList?.remove("active");
+        activeTrigger?.classList?.remove("active");
         dispatch("hide");
     }
 
+    export function hideWithDelay(delay = 0) {
+        if (!active) {
+            return;
+        }
+
+        clearTimeout(hideTimeoutId);
+        hideTimeoutId = setTimeout(hide, delay);
+    }
+
     export function hide() {
+        if (!active) {
+            return; // already hidden
+        }
+
         active = false;
+        isOutsideMouseDown = false;
+        clearTimeout(scrollTimeoutId);
+        clearTimeout(hideTimeoutId);
     }
 
     export function show() {
+        clearTimeout(hideTimeoutId);
+        clearTimeout(scrollTimeoutId);
+
+        if (active) {
+            return; // already active
+        }
+
         active = true;
+
+        // focus toggler container not nested into the trigger
+        if (!activeTrigger?.contains(container)) {
+            container?.focus();
+        }
+
+        scrollTimeoutId = setTimeout(() => {
+            if (!autoScroll) {
+                return;
+            }
+
+            if (containerChild?.scrollIntoViewIfNeeded) {
+                containerChild?.scrollIntoViewIfNeeded();
+            } else if (containerChild?.scrollIntoView) {
+                containerChild?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "nearest",
+                });
+            }
+        }, 180);
     }
 
     export function toggle() {
@@ -41,71 +94,120 @@
         return (
             !container ||
             elem.classList.contains(closableClass) ||
-            // is the trigger itself (or a direct child)
-            (trigger?.contains(elem) && !container.contains(elem)) ||
-            // is closable toggler child
             (container.contains(elem) && elem.closest && elem.closest("." + closableClass))
         );
     }
 
-    function handleClickToggle(e) {
-        if (!active || isClosable(e.target)) {
-            e.preventDefault();
-            toggle();
+    function bindTrigger(newTrigger) {
+        cleanup();
+
+        container?.addEventListener("click", handleContainerClick);
+        container?.addEventListener("keydown", handleContainerKeydown);
+
+        activeTrigger = newTrigger || container?.parentNode;
+        activeTrigger?.addEventListener("click", handleTriggerClick);
+        activeTrigger?.addEventListener("keydown", handleTriggerKeydown);
+    }
+
+    function cleanup() {
+        clearTimeout(scrollTimeoutId);
+        clearTimeout(hideTimeoutId);
+
+        container?.removeEventListener("click", handleContainerClick);
+        container?.removeEventListener("keydown", handleContainerKeydown);
+
+        activeTrigger?.removeEventListener("click", handleTriggerClick);
+        activeTrigger?.removeEventListener("keydown", handleTriggerKeydown);
+    }
+
+    // toggler container handlers
+    // ---------------------------------------------------------------
+    function handleContainerClick(e) {
+        e.stopPropagation(); // prevents firing the trigger click event in case it is nested
+
+        if (isClosable(e.target)) {
+            hide();
         }
     }
 
-    function handleKeydownToggle(e) {
-        if (
-            (e.code === "Enter" || e.code === "Space") && // enter or spacebar
-            (!active || isClosable(e.target))
-        ) {
+    function handleContainerKeydown(e) {
+        if (e.code === "Enter" || e.code === "Space") {
+            e.stopPropagation(); // prevents firing the trigger keydown event in case it is nested
+
+            if (isClosable(e.target)) {
+                // hide with a short delay since the button on:click events
+                // doesn't fire if the element is not visible
+                hideWithDelay(150);
+            }
+        }
+    }
+
+    // trigger handlers
+    // ---------------------------------------------------------------
+    function handleTriggerClick(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggle();
+    }
+
+    function handleTriggerKeydown(e) {
+        if (e.code === "Enter" || e.code === "Space") {
             e.preventDefault();
             e.stopPropagation();
             toggle();
         }
     }
 
-    function handleOutsideClick(e) {
-        if (active && !container?.contains(e.target) && !trigger?.contains(e.target)) {
-            hide();
+    function handleFocusChange(e) {
+        if (active && !activeTrigger?.contains(e.target) && !container?.contains(e.target)) {
+            toggle();
         }
     }
 
     function handleEscPress(e) {
-        if (active && escClose && e.code == "Escape") {
+        if (active && escClose && e.code === "Escape") {
             e.preventDefault();
             hide();
         }
     }
 
-    function handleFocusChange(e) {
-        return handleOutsideClick(e);
+    function handleOutsideMousedown(e) {
+        if (!active) {
+            return;
+        }
+
+        isOutsideMouseDown = !container?.contains(e.target);
+    }
+
+    function handleOutsideClick(e) {
+        if (
+            active &&
+            isOutsideMouseDown &&
+            !container?.contains(e.target) &&
+            !activeTrigger?.contains(e.target) &&
+            !e.target?.closest(".flatpickr-calendar")
+        ) {
+            hide();
+        }
     }
 
     onMount(() => {
-        trigger = trigger || container.parentNode;
+        bindTrigger();
 
-        trigger.addEventListener("click", handleClickToggle);
-        trigger.addEventListener("keydown", handleKeydownToggle);
-
-        return () => {
-            trigger.removeEventListener("click", handleClickToggle);
-            trigger.removeEventListener("keydown", handleKeydownToggle);
-        };
+        return () => cleanup();
     });
 </script>
 
-<svelte:window on:click={handleOutsideClick} on:keydown={handleEscPress} on:focusin={handleFocusChange} />
+<svelte:window
+    on:click={handleOutsideClick}
+    on:mousedown={handleOutsideMousedown}
+    on:keydown={handleEscPress}
+    on:focusin={handleFocusChange}
+/>
 
-<div bind:this={container} class="toggler-container">
+<div bind:this={container} class="toggler-container" tabindex="-1" role="menu">
     {#if active}
-        <div
-            class={classes}
-            class:active
-            in:fly|local={{ duration: 150, y: -5 }}
-            out:fly|local={{ duration: 150, y: 2 }}
-        >
+        <div bind:this={containerChild} class={classes} class:active transition:fly={{ duration: 150, y: 3 }}>
             <slot />
         </div>
     {/if}

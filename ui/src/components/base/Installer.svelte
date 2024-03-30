@@ -18,17 +18,17 @@
         isLoading = true;
 
         try {
-            await ApiClient.Admins.create({
+            await ApiClient.admins.create({
                 email,
                 password,
                 passwordConfirm,
             });
 
-            await ApiClient.Admins.authViaEmail(email, password);
+            await ApiClient.admins.authWithPassword(email, password);
 
             dispatch("submit");
         } catch (err) {
-            ApiClient.errorResponseHandler(err);
+            ApiClient.error(err);
         }
 
         isLoading = false;

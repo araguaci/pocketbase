@@ -1,9 +1,6 @@
 package tests
 
 import (
-	"io"
-	"net/mail"
-
 	"github.com/pocketbase/pocketbase/tools/mailer"
 )
 
@@ -11,19 +8,25 @@ var _ mailer.Mailer = (*TestMailer)(nil)
 
 // TestMailer is a mock `mailer.Mailer` implementation.
 type TestMailer struct {
-	TotalSend    int
-	LastHtmlBody string
+	TotalSend   int
+	LastMessage mailer.Message
+
+	// @todo consider deprecating the above 2 fields?
+	SentMessages []mailer.Message
 }
 
 // Reset clears any previously test collected data.
-func (m *TestMailer) Reset() {
-	m.LastHtmlBody = ""
-	m.TotalSend = 0
+func (tm *TestMailer) Reset() {
+	tm.TotalSend = 0
+	tm.LastMessage = mailer.Message{}
+	tm.SentMessages = nil
 }
 
 // Send implements `mailer.Mailer` interface.
-func (m *TestMailer) Send(fromEmail mail.Address, toEmail mail.Address, subject string, html string, attachments map[string]io.Reader) error {
-	m.LastHtmlBody = html
-	m.TotalSend++
+func (tm *TestMailer) Send(m *mailer.Message) error {
+	tm.TotalSend++
+	tm.LastMessage = *m
+	tm.SentMessages = append(tm.SentMessages, tm.LastMessage)
+
 	return nil
 }

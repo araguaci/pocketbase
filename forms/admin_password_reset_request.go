@@ -2,29 +2,43 @@ package forms
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/go-ozzo/ozzo-validation/v4/is"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/daos"
 	"github.com/pocketbase/pocketbase/mails"
+	"github.com/pocketbase/pocketbase/models"
 	"github.com/pocketbase/pocketbase/tools/types"
 )
 
-// AdminPasswordResetRequest defines an admin password reset request form.
+// AdminPasswordResetRequest is an admin password reset request form.
 type AdminPasswordResetRequest struct {
 	app             core.App
-	resendThreshold float64
+	dao             *daos.Dao
+	resendThreshold float64 // in seconds
 
 	Email string `form:"email" json:"email"`
 }
 
-// NewAdminPasswordResetRequest creates new admin password reset request form.
+// NewAdminPasswordResetRequest creates a new [AdminPasswordResetRequest]
+// form initialized with from the provided [core.App] instance.
+//
+// If you want to submit the form as part of a transaction,
+// you can change the default Dao via [SetDao()].
 func NewAdminPasswordResetRequest(app core.App) *AdminPasswordResetRequest {
 	return &AdminPasswordResetRequest{
 		app:             app,
-		resendThreshold: 120, // 2 min
+		dao:             app.Dao(),
+		resendThreshold: 120, // 2min
 	}
+}
+
+// SetDao replaces the default form Dao instance with the provided one.
+func (form *AdminPasswordResetRequest) SetDao(dao *daos.Dao) {
+	form.dao = dao
 }
 
 // Validate makes the form validatable by implementing [validation.Validatable] interface.
@@ -36,21 +50,24 @@ func (form *AdminPasswordResetRequest) Validate() error {
 			&form.Email,
 			validation.Required,
 			validation.Length(1, 255),
-			is.Email,
+			is.EmailFormat,
 		),
 	)
 }
 
 // Submit validates and submits the form.
 // On success sends a password reset email to the `form.Email` admin.
-func (form *AdminPasswordResetRequest) Submit() error {
+//
+// You can optionally provide a list of InterceptorFunc to further
+// modify the form behavior before persisting it.
+func (form *AdminPasswordResetRequest) Submit(interceptors ...InterceptorFunc[*models.Admin]) error {
 	if err := form.Validate(); err != nil {
 		return err
 	}
 
-	admin, err := form.app.Dao().FindAdminByEmail(form.Email)
+	admin, err := form.dao.FindAdminByEmail(form.Email)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to fetch admin with email %s: %w", form.Email, err)
 	}
 
 	now := time.Now().UTC()
@@ -59,12 +76,14 @@ func (form *AdminPasswordResetRequest) Submit() error {
 		return errors.New("You have already requested a password reset.")
 	}
 
-	if err := mails.SendAdminPasswordReset(form.app, admin); err != nil {
-		return err
-	}
+	return runInterceptors(admin, func(m *models.Admin) error {
+		if err := mails.SendAdminPasswordReset(form.app, m); err != nil {
+			return err
+		}
 
-	// update last sent timestamp
-	admin.LastResetSentAt = types.NowDateTime()
+		// update last sent timestamp
+		m.LastResetSentAt = types.NowDateTime()
 
-	return form.app.Dao().SaveAdmin(admin)
+		return form.dao.SaveAdmin(m)
+	}, interceptors...)
 }

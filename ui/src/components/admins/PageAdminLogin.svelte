@@ -1,16 +1,14 @@
 <script>
-    import { link } from "svelte-spa-router";
-    import { replace } from "svelte-spa-router";
+    import { link, replace, querystring } from "svelte-spa-router";
     import FullPage from "@/components/base/FullPage.svelte";
     import ApiClient from "@/utils/ApiClient";
-    import CommonHelper from "@/utils/CommonHelper";
     import Field from "@/components/base/Field.svelte";
-    import { addErrorToast } from "@/stores/toasts";
+    import { addErrorToast, removeAllToasts } from "@/stores/toasts";
 
-    const queryParams = CommonHelper.getQueryParams(window.location?.href);
+    const queryParams = new URLSearchParams($querystring);
 
-    let email = queryParams.demoEmail || "";
-    let password = queryParams.demoPassword || "";
+    let email = queryParams.get("demoEmail") || "";
+    let password = queryParams.get("demoPassword") || "";
     let isLoading = false;
 
     function login() {
@@ -20,8 +18,10 @@
 
         isLoading = true;
 
-        return ApiClient.Admins.authViaEmail(email, password)
+        return ApiClient.admins
+            .authWithPassword(email, password)
             .then(() => {
+                removeAllToasts();
                 replace("/");
             })
             .catch(() => {
@@ -39,7 +39,7 @@
             <h4>Admin sign in</h4>
         </div>
 
-        <Field class="form-field required" name="email" let:uniqueId>
+        <Field class="form-field required" name="identity" let:uniqueId>
             <label for={uniqueId}>Email</label>
             <!-- svelte-ignore a11y-autofocus -->
             <input type="email" id={uniqueId} bind:value={email} required autofocus />
