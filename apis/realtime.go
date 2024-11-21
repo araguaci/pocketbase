@@ -245,7 +245,7 @@ func (api *realtimeApi) unregisterClientsByAuthModel(contextKey string, model mo
 		if clientModel != nil &&
 			clientModel.TableName() == model.TableName() &&
 			clientModel.GetId() == model.GetId() {
-			api.app.SubscriptionsBroker().Unregister(client.Id())
+			client.Unset(contextKey)
 		}
 	}
 
@@ -371,7 +371,7 @@ type recordData struct {
 func (api *realtimeApi) broadcastRecord(action string, record *models.Record, dryCache bool) error {
 	collection := record.Collection()
 	if collection == nil {
-		return errors.New("[broadcastRecord] Record collection not set.")
+		return errors.New("[broadcastRecord] Record collection not set")
 	}
 
 	clients := api.app.SubscriptionsBroker().Clients()
